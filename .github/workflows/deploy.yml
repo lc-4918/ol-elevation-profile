@@ -1,0 +1,47 @@
+name: Deploy docs & demo to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm install
+      - run: npm run build          # -> dist/ (ESM + UMD + min + css)
+      - run: npm run docs:build      # -> docs/.vitepress/dist
+      - name: Assemble site (docs + demo + library)
+        run: |
+          SITE=docs/.vitepress/dist
+          mkdir -p "$SITE/demo" "$SITE/dist"
+          cp demo/index.html "$SITE/demo/"
+          cp -r demo/data "$SITE/demo/data"
+          cp dist/ol-elevation-profile.js dist/ol-elevation-profile.css "$SITE/dist/"
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/.vitepress/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

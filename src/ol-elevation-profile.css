@@ -1,0 +1,112 @@
+/*! ol-elevation-profile — styles (MIT) */
+
+.ol-elevation-profile {
+  --oep-area: #4682b4;
+  --oep-line: #3a6d96;
+  --oep-axis: #555;
+  --oep-text: #222;
+  --oep-focus: #e6550d;
+  --oep-bg: rgba(255, 255, 255, 1);
+
+  position: absolute;
+  box-sizing: border-box;
+  background: var(--oep-bg);
+  color: var(--oep-text);
+  font: 12px/1.3 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.18);
+  padding: 6px 8px 4px;
+  z-index: 5;
+  max-width: 100%;
+}
+.ol-elevation-profile.oep-transparent { backdrop-filter: blur(2px); }
+
+/* ---- 8 ancrages ---- */
+.ol-elevation-profile.oep-pos-bottom       { left: 50%; bottom: .6em; transform: translateX(-50%); }
+.ol-elevation-profile.oep-pos-top          { left: 50%; top: .6em;    transform: translateX(-50%); }
+.ol-elevation-profile.oep-pos-left         { left: .6em; top: 50%;    transform: translateY(-50%); }
+.ol-elevation-profile.oep-pos-right        { right: .6em; top: 50%;   transform: translateY(-50%); }
+.ol-elevation-profile.oep-pos-top-left     { left: .6em;  top: .6em; }
+.ol-elevation-profile.oep-pos-top-right    { right: .6em; top: .6em; }
+.ol-elevation-profile.oep-pos-bottom-left  { left: .6em;  bottom: .6em; }
+.ol-elevation-profile.oep-pos-bottom-right { right: .6em; bottom: .6em; }
+
+/* ---- mobile : pleine largeur, collé en haut ou en bas ---- */
+.ol-elevation-profile.oep-mobile { left: 0 !important; right: 0 !important; width: auto !important; transform: none !important; }
+.ol-elevation-profile.oep-mobile.oep-pos-bottom { bottom: 0; border-radius: 10px 10px 0 0; }
+.ol-elevation-profile.oep-mobile.oep-pos-top    { top: 0;    border-radius: 0 0 10px 10px; }
+
+/* ---- entête ---- */
+.oep-header { display: flex; align-items: center; gap: 8px; width: 100%; padding: 0 2px 2px; }
+.oep-title  { flex: 0 1 auto; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.oep-title a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.oep-stats  { flex: 1 1 auto; min-width: 0; font-size: 11px; opacity: .85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.oep-stats a { color: var(--oep-focus); }
+.oep-stats .oep-up   { color: #c0392b; }
+.oep-stats .oep-down { color: #2471a3; }
+
+/* ---- barre d'outils zoom ---- */
+.oep-toolbar { flex: 0 0 auto; display: inline-flex; gap: 2px; margin-left: auto; }
+.oep-tbtn {
+  display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 22px;
+  border: 1px solid transparent; background: transparent; cursor: pointer; color: var(--oep-text);
+  opacity: .7; border-radius: 4px; padding: 0;
+}
+.oep-tbtn:hover { opacity: 1; background: rgba(0, 0, 0, .07); }
+.oep-tbtn.armed { opacity: 1; border-color: var(--oep-focus); color: var(--oep-focus); }
+.oep-tbtn svg { width: 16px; height: 16px; display: block; }
+
+.oep-toggle {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; padding: 0; border: 0; background: transparent; cursor: pointer;
+  color: var(--oep-text); opacity: .65; border-radius: 4px;
+}
+.oep-toolbar + .oep-toggle { margin-left: 0; }
+.oep-toggle:hover { opacity: 1; background: rgba(0, 0, 0, .07); }
+.oep-toggle svg { width: 15px; height: 15px; display: block; }
+
+/* ---- légende de pente ---- */
+.oep-legend { display: flex; flex-wrap: wrap; gap: 4px 10px; padding: 0 2px 4px; font-size: 10px; opacity: .9; }
+.oep-leg-it { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.oep-sw { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+
+.oep-body { overflow: hidden; }
+
+/* ---- mode réduit : on rétracte le contrôle à la largeur Titre + bouton ---- */
+.ol-elevation-profile.oep-collapsed { width: auto !important; }
+.ol-elevation-profile.oep-collapsed .oep-body,
+.ol-elevation-profile.oep-collapsed .oep-legend { display: none !important; }
+.ol-elevation-profile.oep-collapsed .oep-stats,
+.ol-elevation-profile.oep-collapsed .oep-toolbar { display: none !important; }
+.ol-elevation-profile.oep-collapsed .oep-header { width: auto; }
+
+/* ---- chart ---- */
+.oep-svg { display: block; }
+.oep-area { fill: var(--oep-area); opacity: .6; }
+.oep-line { fill: none; stroke: var(--oep-line); stroke-width: 1.4; }
+.oep-area-slope { opacity: .92; stroke: none; }
+.oep-slope-sep { stroke: rgba(40, 40, 40, .35); stroke-width: .8; shape-rendering: crispEdges; }
+
+.oep-ab-line  { stroke: var(--oep-focus); stroke-width: 1.4; }
+.oep-ab-label { fill: var(--oep-focus); font-size: 11px; font-weight: 700; }
+
+.oep-axis path, .oep-axis line { stroke: var(--oep-axis); shape-rendering: crispEdges; }
+.oep-axis text { fill: var(--oep-text); font-size: 10px; }
+.oep-axis-label { fill: var(--oep-text); font-size: 10px; opacity: .8; }
+.oep-grid line { stroke: var(--oep-axis); opacity: .16; shape-rendering: crispEdges; }
+.oep-grid path { stroke: none; }
+
+.oep-overlay { fill: transparent; cursor: crosshair; }
+.oep-focus-line { stroke: var(--oep-focus); stroke-width: 1; stroke-dasharray: 3 2; }
+.oep-focus-dot  { fill: var(--oep-focus); stroke: #fff; stroke-width: 1.5; }
+.oep-focus-txt  { fill: var(--oep-text); font-size: 10px; font-weight: 600; }
+.oep-focus-bg   { fill: rgba(255, 255, 255, .9); }
+
+.oep-marker {
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--oep-focus, #e6550d); border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .35); pointer-events: none;
+}
+.ol-elevation-profile.oep-floating { transform: none; }
+
+.oep-time{opacity:.85}

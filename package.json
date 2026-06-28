@@ -1,0 +1,75 @@
+{
+  "name": "ol-elevation-profile",
+  "version": "0.6.0",
+  "description": "Synchronized elevation profile control for OpenLayers, rendered with d3. Reads elevation directly from 3D GPX/GeoJSON geometries.",
+  "type": "module",
+  "main": "dist/ol-elevation-profile.js",
+  "module": "dist/ol-elevation-profile.esm.js",
+  "unpkg": "dist/ol-elevation-profile.min.js",
+  "jsdelivr": "dist/ol-elevation-profile.min.js",
+  "style": "dist/ol-elevation-profile.css",
+  "exports": {
+    ".": {
+      "import": "./dist/ol-elevation-profile.esm.js",
+      "require": "./dist/ol-elevation-profile.js",
+      "default": "./dist/ol-elevation-profile.js"
+    },
+    "./css": "./dist/ol-elevation-profile.css",
+    "./dist/*": "./dist/*",
+    "./src/*": "./src/*"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": [
+    "*.css"
+  ],
+  "scripts": {
+    "build": "rollup -c && cp src/ol-elevation-profile.css dist/ol-elevation-profile.css",
+    "prepublishOnly": "npm run build",
+    "test": "node test/smoke.js",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs"
+  },
+  "keywords": [
+    "openlayers",
+    "ol",
+    "d3",
+    "elevation",
+    "profile",
+    "altitude",
+    "gpx",
+    "geojson",
+    "cycling",
+    "mtb",
+    "hiking"
+  ],
+  "peerDependencies": {
+    "d3": ">=7",
+    "ol": ">=6"
+  },
+  "devDependencies": {
+    "@rollup/plugin-terser": "^1.0.0",
+    "d3": "^7.9.0",
+    "jsdom": "^25.0.0",
+    "rollup": "^4.62.2",
+    "vitepress": "^1.6.4"
+  },
+  "license": "MIT",
+  "author": "lc-4918",
+  "homepage": "https://lc-4918.github.io/ol-elevation-profile/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lc-4918/ol-elevation-profile.git"
+  },
+  "bugs": {
+    "url": "https://github.com/lc-4918/ol-elevation-profile/issues"
+  }
+}

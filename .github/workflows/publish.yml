@@ -1,0 +1,24 @@
+name: Publish to npm
+
+# Publie sur npmjs quand tu publies une Release GitHub (ou manuellement).
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write          # pour la provenance npm (optionnel)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: 'https://registry.npmjs.org'   # crée le .npmrc d'auth
+      - run: npm install
+      - run: npm publish --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}     # secret GitHub, jamais dans le YAML
