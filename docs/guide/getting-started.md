@@ -1,6 +1,6 @@
 # Getting started
 
-`ol-elevation-profile` is an OpenLayers control that draws a synchronized elevation profile for a track whose geometry carries elevation (`[lon, lat, z]`). A track **without** Z is filled from a terrain model — keyless AWS terrain tiles, **on by default**, so the control fetches them on its own; `dem: null` turns that off. It needs **OpenLayers** and **d3** to be present — it never bundles them.
+`ol-elevation-profile` is an OpenLayers control that draws a synchronized elevation profile for a track whose geometry carries elevation (`[lon, lat, z]`). A track **without** Z is filled from a terrain model: keyless AWS terrain tiles, **on by default**, so the control fetches them on its own. `dem: null` turns that off. It needs **OpenLayers** and **d3** to be present; it never bundles them.
 
 ## Compatibility
 
@@ -57,7 +57,7 @@ Click a track (or hover, with `show: 'mouseover'`), move over the map or the cha
 
 ## Supported formats
 
-The control only consumes OpenLayers `Feature`s, so **any format OpenLayers can read works** — GeoJSON, GPX, KML, etc. Read GPX or KML exactly the same way:
+The control only consumes OpenLayers `Feature`s, so **any format OpenLayers can read works** (GeoJSON, GPX, KML, and so on). Read GPX or KML exactly the same way:
 
 ```js
 const feats = new ol.format.GPX().readFeatures(text, {

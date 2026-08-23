@@ -4,95 +4,138 @@ Every option can be passed to the constructor and most can be changed at runtime
 
 ## Layout & size
 
-**`immersion`** — panel placement strategy. `'docked'` anchors the panel to a map edge; `'floating'` is a free-floating panel (partial). Default: `'docked'`.
+**`immersion`**: panel placement strategy. `'docked'` anchors the panel to a map edge; `'floating'` is a free-floating panel (partial). Default: `'docked'`.
 
-**`position`** — where the panel is anchored on the map: `'top'`, `'bottom'`, `'left'`, `'right'`, `'top-left'`, `'top-right'`, `'bottom-left'`, `'bottom-right'`. Default: `'bottom'` (full-width strip along the bottom).
+**`position`**: where the panel is anchored on the map: `'top'`, `'bottom'`, `'left'`, `'right'`, `'top-left'`, `'top-right'`, `'bottom-left'`, `'bottom-right'`. Default: `'bottom'` (full-width strip along the bottom).
 
-**`width`** — panel width. A number is pixels, automatically capped to the map width; `'auto'`, `'100%'` or `'full'` make it span the whole map width. Default: `520` (px).
+**`width`**: panel width. A number is pixels, automatically capped to the map width; `'auto'`, `'100%'` or `'full'` make it span the whole map width. Default: `520` (px).
 
-**`height`** — panel height in pixels. Default: `180`.
+**`height`**: panel height in pixels. Default: `180`.
 
-**`margins`** — inner chart margins, as `{ unit, top, right, bottom, left }`. `unit` is `'px'`, `'em'` or `'rem'`. Default: `{ unit:'px', top:20, right:24, bottom:30, left:48 }` (extra left room for the elevation axis).
+**`margins`**: inner chart margins, as `{ unit, top, right, bottom, left }`. `unit` is `'px'`, `'em'` or `'rem'`. Default: `{ unit:'px', top:20, right:24, bottom:30, left:48 }` (extra left room for the elevation axis).
 
-**`responsive`** — when `true`, the width and placement adapt to the map size, including switching to mobile mode. When `false`, fixed values are kept. Default: `true`.
+**`responsive`**: when `true`, the width and placement adapt to the map size, including switching to mobile mode. When `false`, fixed values are kept. Default: `true`.
 
-**`mobileBreakpoint`** — map width (px) at or below which mobile mode applies (100% width, placement forced to `top`/`bottom`). Default: `640`.
+**`mobileBreakpoint`**: map width (px) at or below which mobile mode applies (100% width, placement forced to `top`/`bottom`). Default: `640`.
 
 ## Units & data
 
-**`units`** — measurement system: `'meters'` (km / m) or `'imperial'` (mi / ft). Default: `'meters'`.
+**`units`**: measurement system: `'meters'` (km / m) or `'imperial'` (mi / ft). Default: `'meters'`.
 
-**`dataProjection`** — projection of the feature coordinates. `null` means the map view projection is used; otherwise pass a code such as `'EPSG:4326'` or an `ol/proj/Projection`. Default: `null`.
+**`dataProjection`**: projection of the feature coordinates. `null` means the map view projection is used; otherwise pass a code such as `'EPSG:4326'` or an `ol/proj/Projection`. Default: `null`.
 
-**`maxPoints`** — caps how many points are drawn and used for interaction (the geometry is decimated above this). Statistics always use the full data. `0` disables decimation. Default: `2000`.
+**`maxPoints`**: caps how many points are drawn and used for interaction (the geometry is decimated above this). Statistics always use the full data. `0` disables decimation. Default: `2000`.
 
-**`dem`** — fill missing elevations from a terrain model when the feature has no Z. `'terrarium'` (default) or `true` = [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/), keyless; **`null` disables it** and keeps the control entirely offline; or an object `{ url, encoding, zoom, maxZoom, maxTiles, tileSize, concurrency }`. Being on by default, a track without Z makes the control fetch tiles on its own — and brings an attribution obligation with it. See [Terrain model](/guide/features#terrain-model). Default: `'terrarium'`.
+**`dem`**: fill missing elevations from a terrain model when the feature has no Z. Inert on a track that already carries its own Z: elevations present in the file are never overwritten. Default: `'terrarium'`. `null` disables it and keeps the control off the network entirely.
 
-**`smoothing`** — elevation smoothing as a sliding-window average over a distance in **metres** (`0` = none). Being metric, it is independent of GPS point density and softens both the profile and the slope. Default: `0`.
+Shorthands: `true` or `'terrarium'` (AWS Terrain Tiles), `'ign'` (IGN Géoplateforme), or a function `(lonlats, ctx) => number[] | Promise<number[]>`. Otherwise an object, whose keys select **one** source:
+
+| Key | Source |
+|---|---|
+| `source` | `'terrarium'` (default) or `'ign'` |
+| `url` | XYZ template, `{z}` `{x}` `{y}` |
+| `wms` | `{ url, layers, params, projection }`: WMS tiles, one `GetMap` per tile |
+| `olSource` | any `ol/source/TileImage` (XYZ, TileWMS, ...) or `ol/source/GeoTIFF` |
+| `featureInfo` | `{ url, layers, queryLayers, property, resolution, params, projection }`: WMS GetFeatureInfo, one request per point |
+| `sample` | `(lonlats, ctx) => number[] | Promise<number[]>`: you fetch them yourself |
+
+Common keys, whatever the source:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `encoding` | `'terrarium'` | `'terrarium'`, `'mapbox'`, or `(r, g, b, a) => metres`. Ignored by `featureInfo`, `sample` and GeoTIFF, which carry values rather than colours. Return `null` where a pixel holds no measurement. |
+| `zoom` | `'auto'` | Tile zoom, or the finest level fitting within `maxTiles` |
+| `maxZoom` | `14` | Ceiling for `zoom: 'auto'` |
+| `maxTiles` | `32` | Tile budget per track. It is the tiling that widens as the track grows, not the model that degrades |
+| `tileSize` | `256` | Tile side, in pixels |
+| `concurrency` | `6` | Tiles, or GetFeatureInfo requests, in flight at once |
+| `band` | `0` | Band read from a multi-band GeoTIFF |
+
+Source-specific keys:
+
+| Key | Source | Default | Meaning |
+|---|---|---|---|
+| `apiKey` | `'ign'` | none | Appended as a query parameter. **Not needed** on the public endpoint |
+| `apiKeyParam` | `'ign'` | `'apikey'` | Name of that parameter |
+| `batch` | `'ign'` | `200` | Points per request. Beyond that the URL takes a 414 |
+| `minInterval` | `'ign'` | `1100` | Milliseconds between calls; the service announces 1 req/s |
+| `resource` | `'ign'` | `'ign_rge_alti_wld'` | Coverage queried |
+| `layers` | `wms`, `featureInfo` | - | Layer name. Required |
+| `queryLayers` | `featureInfo` | `layers` | Queried layers, when they differ from the drawn ones |
+| `property` | `featureInfo` | first number | Band property name (`GRAY_INDEX` on GeoServer). Required as soon as the layer carries more than one band |
+| `resolution` | `featureInfo` | `1` | Half-size, in metres, of the box around the point |
+| `params` | `wms`, `featureInfo` | - | Extra WMS parameters, merged over the defaults. Changing `VERSION` to 1.1.1 switches `CRS` to `SRS` on its own |
+| `projection` | `wms`, `featureInfo` | `'EPSG:3857'` | Reference system of the requests |
+
+A fill is **all or nothing**: one unresolved point abandons it, and the profile stays as it would have been without. The `demload` event reports the outcome, `{ ok, zoom, tiles }`, with `zoom: null` and `tiles: 0` for a source that is not tiled. See [Terrain model](/guide/features#terrain-model).
+
+**`smoothing`**: elevation smoothing as a sliding-window average over a distance in **metres** (`0` = none). Being metric, it is independent of GPS point density and softens both the profile and the slope. Default: `0`.
 
 ## Appearance
 
-**`theme`** — colour theme. A built-in name (`'steelblue'`, `'lime'`, `'purple'`, `'slate'`, `'graphite'`, `'amber'`) or a colours object `{ area, line, axis, text, focus }`. Default: `'steelblue'`.
+**`theme`**: colour theme. A built-in name (`'steelblue'`, `'lime'`, `'purple'`, `'slate'`, `'graphite'`, `'amber'`) or a colours object `{ area, line, axis, text, focus }`. Default: `'steelblue'`.
 
-**`color`** — overrides the chart colour. `null` keeps the theme; `'auto'` uses the track's own colour (requires `trackLayer`), filling the area and darkening the line; any CSS colour string forces that colour. Default: `null`.
+**`color`**: overrides the chart colour. `null` keeps the theme; `'auto'` uses the track's own colour (requires `trackLayer`), filling the area and darkening the line; any CSS colour string forces that colour. Default: `null`.
 
-**`trackLayer`** — the vector layer whose style provides the stroke colour when `color: 'auto'`. Default: `null`.
+**`trackLayer`**: the vector layer whose style provides the stroke colour when `color: 'auto'`. Default: `null`.
 
-**`transparency`** — background transparency. `false` is opaque; `true` uses `transparencyLevel`; a number `0..1` sets the alpha directly (`0` = fully transparent). Default: `false`.
+**`transparency`**: background transparency. `false` is opaque; `true` uses `transparencyLevel`; a number `0..1` sets the alpha directly (`0` = fully transparent). Default: `false`.
 
-**`transparencyLevel`** — the alpha applied when `transparency === true` (`0..1`). Default: `0.45`.
+**`transparencyLevel`**: the alpha applied when `transparency === true` (`0..1`). Default: `0.45`.
 
-**`grid`** — horizontal grid lines drawn with the axis colour at low opacity. Default: `true`.
+**`grid`**: horizontal grid lines drawn with the axis colour at low opacity. Default: `true`.
 
-**`xTicks`** — number of X-axis ticks; `null` lets the library choose from the width. Default: `null`.
+**`xTicks`**: number of X-axis ticks; `null` lets the library choose from the width. Default: `null`.
 
-**`yTicks`** — number of Y-axis ticks; `null` lets the library choose from the height. Default: `null`.
+**`yTicks`**: number of Y-axis ticks; `null` lets the library choose from the height. Default: `null`.
 
 ## Slope
 
-**`slope`** — when `true`, the profile is split into contiguous portions coloured by slope class. Default: `false`.
+**`slope`**: when `true`, the profile is split into contiguous portions coloured by slope class. Default: `false`.
 
-**`slopeClassSize`** — width of one slope class, in **percent**. Default: `2.5`.
+**`slopeClassSize`**: width of one slope class, in **percent**. Default: `2.5`.
 
-**`maxClasses`** — maximum number of slope classes (colours + legend). Steeper slopes fold into the last class, shown as `≥ X %`. Default: `8`.
+**`maxClasses`**: maximum number of slope classes (colours + legend). Steeper slopes fold into the last class, shown as `≥ X %`. Default: `8`.
 
-**`slopeColors`** — `null` uses the built-in blue→red ramp (cyan/green, pure yellow in the middle). Otherwise an array of CSS colours, interpolated across the classes present. Default: `null`.
+**`slopeColors`**: `null` uses the built-in blue→red ramp (cyan/green, pure yellow in the middle). Otherwise an array of CSS colours, interpolated across the classes present. Default: `null`.
 
-**`slopeSeparators`** — draw a vertical separator at each slope-class change. Default: `true`.
+**`slopeSeparators`**: draw a vertical separator at each slope-class change. Default: `true`.
 
-**`slopeLegend`** — show the colour legend under the title. Default: `true`.
+**`slopeLegend`**: show the colour legend under the title. Default: `true`.
 
 ## Behaviour
 
-**`show`** — how a track on the map triggers its profile: `'click'` or `'mouseover'`. Default: `'click'`.
+**`show`**: how a track on the map triggers its profile: `'click'` or `'mouseover'`. Default: `'click'`.
 
-**`hideOnMapClick`** — a click on the empty map hides the whole control. Default: `true`.
+**`hideOnMapClick`**: a click on the empty map hides the whole control. Default: `true`.
 
-**`followMap`** — moving the pointer over the map moves the indicator on the chart. Default: `true`.
+**`followMap`**: moving the pointer over the map moves the indicator on the chart. Default: `true`.
 
-**`marker`** — show the position marker (dot) on the map as you move along the chart. Default: `true`.
+**`marker`**: show the position marker (dot) on the map as you move along the chart. Default: `true`.
 
-**`collapsable`** — show the collapse/expand button; collapsed, the control shrinks to title + button. Default: `true`.
+**`collapsable`**: show the collapse/expand button; collapsed, the control shrinks to title + button. Default: `true`.
 
-**`collapsed`** — initial collapsed state. Default: `false`.
+**`collapsed`**: initial collapsed state. Default: `false`.
 
-**`zoom`** — show the A/B crop buttons, which crop both map and profile to a sub-range (A reset to 0). Default: `false`.
+**`exportPng`**: adds a toolbar button, to the right of the zoom buttons, saving the whole panel as a PNG: title, stats, legend and chart. Default: `false`. See [PNG export](/guide/features#png-export) and the `exportPNG()` method.
 
-**`ignoreStops`** — when computing time, exclude stopped segments so the duration is **moving time**. `false` gives raw wall-clock time. Default: `true`.
+**`zoom`**: show the A/B crop buttons, which crop both map and profile to a sub-range (A reset to 0). Default: `false`.
 
-**`stopSpeed`** — speed threshold in **m/s** (≈ 1.8 km/h) below which a segment counts as a stop. Default: `0.5`.
+**`ignoreStops`**: when computing time, exclude stopped segments so the duration is **moving time**. `false` gives raw wall-clock time. Default: `true`.
+
+**`stopSpeed`**: speed threshold in **m/s** (≈ 1.8 km/h) below which a segment counts as a stop. Default: `0.5`.
 
 ## Content (header, tooltip, title)
 
-**`tooltipItems`** — what the hover tooltip shows, any of `'distance'`, `'elevation'`, `'slope'`, `'time'` (elapsed time at the cursor, if the track has time data). Default: `['distance','elevation']`.
+**`tooltipItems`**: what the hover tooltip shows, any of `'distance'`, `'elevation'`, `'slope'`, `'time'` (elapsed time at the cursor, if the track has time data). Default: `['distance','elevation']`.
 
-**`headerItems`** — what the header line shows. String tokens: `'distance'`, `'ascent'`, `'descent'`, `'min'`, `'max'`, `'minmax'`, `'duration'` (total elapsed time). An entry can also be an object pulling a feature property: `{ property, label?, asLink?, linkText? }` (`asLink` renders a URL value as a link). Default: `['distance','ascent','descent','minmax']`.
+**`headerItems`**: what the header line shows. String tokens: `'distance'`, `'ascent'`, `'descent'`, `'min'`, `'max'`, `'minmax'`, `'duration'` (total elapsed time). An entry can also be an object pulling a feature property: `{ property, label?, asLink?, linkText? }` (`asLink` renders a URL value as a link). Default: `['distance','ascent','descent','minmax']`.
 
-**`titleProperty`** — the feature property used as the title. Default: `'name'`.
+**`titleProperty`**: the feature property used as the title. Default: `'name'`.
 
-**`titleLink`** — a feature property holding a URL; when present, the title becomes a clickable link. Default: `null`.
+**`titleLink`**: a feature property holding a URL; when present, the title becomes a clickable link. Default: `null`.
 
-**`labels`** — all user-facing strings, overridable individually. Keys and defaults: `distance` `'Distance'`, `elevation` `'Altitude'`, `slope` `'Pente'`, `ascent` `'D+'`, `descent` `'D-'`, `empty` `'Cliquez un tracé'` (placeholder title), `time` `'Temps'`, `duration` `'Durée'`, `durationUnits` `{ s:'sec', m:'min', h:'h', d:'j' }` (time unit abbreviations), `zoomStart` `'Définir le début (A)'`, `zoomEnd` `'Définir la fin (B)'`, `zoomAll` `'Tout voir'`, `loading` `'Chargement du profil altimétrique'` (accessible name of the terrain-model spinner).
+**`labels`**: all user-facing strings, overridable individually. Keys and defaults: `distance` `'Distance'`, `elevation` `'Altitude'`, `slope` `'Pente'`, `ascent` `'D+'`, `descent` `'D-'`, `empty` `'Cliquez un tracé'` (placeholder title), `time` `'Temps'`, `duration` `'Durée'`, `durationUnits` `{ s:'sec', m:'min', h:'h', d:'j' }` (time unit abbreviations), `zoomStart` `'Définir le début (A)'`, `zoomEnd` `'Définir la fin (B)'`, `zoomAll` `'Tout voir'`, `exportPng` `'Exporter en PNG'` (export button), `loading` `'Chargement du profil altimétrique'` (accessible name of the terrain-model spinner).
 
 ```js
 // Example: English labels
@@ -100,7 +143,8 @@ new OlElevationProfile({
   labels: {
     elevation: 'Elevation', slope: 'Slope', empty: 'Click a track',
     duration: 'Duration', durationUnits: { s: 'sec', m: 'min', h: 'h', d: 'd' },
-    zoomStart: 'Set start (A)', zoomEnd: 'Set end (B)', zoomAll: 'Show all'
+    zoomStart: 'Set start (A)', zoomEnd: 'Set end (B)', zoomAll: 'Show all',
+    exportPng: 'Export as PNG', loading: 'Loading the elevation profile'
   }
 })
 ```
@@ -122,7 +166,12 @@ const profile = new OlElevationProfile({
   units: 'meters',                  // 'meters' | 'imperial'
   dataProjection: null,             // null = view projection | 'EPSG:4326' | Projection
   maxPoints: 2000,                  // render/interaction decimation (0 = none)
-  dem: 'terrarium',                 // AWS tiles | true | null = off | { url, encoding, zoom, maxTiles }
+  dem: 'terrarium',                 // terrain model filling a track with no Z; null = off
+                                    //   'terrarium' | 'ign' | (lonlats) => number[]
+                                    //   | { url: '.../{z}/{x}/{y}.png', encoding: 'terrarium' }
+                                    //   | { wms: { url, layers } }
+                                    //   | { olSource }        // TileImage or GeoTIFF
+                                    //   | { featureInfo: { url, layers, property } }
   smoothing: 0,                     // elevation smoothing window, in metres
 
   // Appearance
@@ -150,6 +199,7 @@ const profile = new OlElevationProfile({
   marker: true,
   collapsable: true,
   collapsed: false,
+  exportPng: false,                 // toolbar button saving the panel as a PNG
   zoom: false,                      // A/B crop buttons
   ignoreStops: true,                // moving time (ignore stops)
   stopSpeed: 0.5,                   // m/s stop threshold
@@ -165,6 +215,7 @@ const profile = new OlElevationProfile({
     time: 'Temps', duration: 'Durée',
     durationUnits: { s: 'sec', m: 'min', h: 'h', d: 'j' },
     zoomStart: 'Définir le début (A)', zoomEnd: 'Définir la fin (B)', zoomAll: 'Tout voir',
+    exportPng: 'Exporter en PNG',
     loading: 'Chargement du profil altimétrique'
   }
 })
@@ -173,7 +224,7 @@ map.addControl(profile)
 
 ## Methods
 
-**`setFeature(feature)`** — show the profile for an OpenLayers feature, ideally 3D: `LineString`, `MultiLineString`, or a `Polygon` / `MultiPolygon`, profiled along its **outer ring** (holes are ignored; the profile returns to its starting point, so D+ equals D− — see [Geometry types](/guide/features#geometry-types)). A falsy value hides the control. Returns `this`.
+**`setFeature(feature)`**: show the profile for an OpenLayers feature, ideally 3D: `LineString`, `MultiLineString`, or a `Polygon` / `MultiPolygon`, profiled along its **outer ring** (holes are ignored; the profile returns to its starting point, so D+ equals D−, see [Geometry types](/guide/features#geometry-types)). A falsy value hides the control. Returns `this`.
 
 ```js
 const f = new ol.format.GeoJSON().readFeatures(geojson, {
@@ -182,20 +233,20 @@ const f = new ol.format.GeoJSON().readFeatures(geojson, {
 profile.setFeature(f)
 ```
 
-**`clear()`** — hide the profile and forget the current feature. Returns `this`.
+**`clear()`**: hide the profile and forget the current feature. Returns `this`.
 
 ```js
 profile.clear()
 ```
 
-**`setTheme(name | object)`** — change the colour theme and re-render.
+**`setTheme(name | object)`**: change the colour theme and re-render.
 
 ```js
 profile.setTheme('amber')
 profile.setTheme({ area: '#1f6fb2', line: '#0d3c61', axis: '#345', text: '#123', focus: '#e0532a' })
 ```
 
-**`setColor(color | null)`** — change the chart colour: a CSS colour, `'auto'` (track colour), or `null` to fall back to the theme.
+**`setColor(color | null)`**: change the chart colour: a CSS colour, `'auto'` (track colour), or `null` to fall back to the theme.
 
 ```js
 profile.setColor('#e0532a')
@@ -203,20 +254,22 @@ profile.setColor('auto')   // needs trackLayer
 profile.setColor(null)     // back to theme
 ```
 
-**`setOptions(patch)`** — update one or more options at runtime and re-render. Returns `this`.
+**`setOptions(patch)`**: update one or more options at runtime and re-render. Returns `this`.
 
 ```js
 profile.setOptions({ slope: true, smoothing: 60, tooltipItems: ['distance', 'elevation', 'slope', 'time'] })
 ```
 
-**`toggleCollapsed(force?)`** — collapse or expand. Pass `true`/`false` to force a state.
+**`toggleCollapsed(force?)`**: collapse or expand. Pass `true`/`false` to force a state.
 
 ```js
 profile.toggleCollapsed()      // toggle
 profile.toggleCollapsed(true)  // force collapsed
 ```
 
-**`getStats()`** — return the current statistics: `{ distance, duration, ascent, descent, min, max, maxAbsSlope, points }`. `duration` is `null` when the track has no time data.
+**`exportPNG(opts)`**: export the panel as a PNG and resolve with the `Blob`. `opts.scale` defaults to the device pixel ratio, `opts.filename` to the track title, and `opts.download: false` returns the Blob without saving the file. Works whether or not `exportPng` shows the button. Rejects when there is no profile drawn.
+
+**`getStats()`**: return the current statistics: `{ distance, duration, ascent, descent, min, max, maxAbsSlope, points }`. `duration` is `null` when the track has no time data.
 
 ```js
 const { distance, ascent, duration } = profile.getStats()
@@ -225,26 +278,26 @@ console.log(distance, ascent, duration)
 
 ### Static members
 
-**`OlElevationProfile.addTheme(name, colors)`** — register a custom theme usable by `theme`/`setTheme`.
+**`OlElevationProfile.addTheme(name, colors)`**: register a custom theme usable by `theme`/`setTheme`.
 
 ```js
 OlElevationProfile.addTheme('ocean', { area: '#0aa', line: '#066', axis: '#055', text: '#022', focus: '#f60' })
 new OlElevationProfile({ theme: 'ocean' })
 ```
 
-**`OlElevationProfile.featureHasZ(feature)`** — `true` if the feature has any Z (elevation) coordinate.
+**`OlElevationProfile.featureHasZ(feature)`**: `true` if the feature has any Z (elevation) coordinate.
 
 ```js
 if (!OlElevationProfile.featureHasZ(f)) console.warn('No altimetry on this track')
 ```
 
-**`OlElevationProfile.featureHasTime(feature)`** — `true` if the feature carries per-point time data.
+**`OlElevationProfile.featureHasTime(feature)`**: `true` if the feature carries per-point time data.
 
 ```js
 if (OlElevationProfile.featureHasTime(f)) profile.setOptions({ headerItems: ['distance', 'duration'] })
 ```
 
-**`OlElevationProfile.version`** — the library version string.
+**`OlElevationProfile.version`**: the library version string.
 
 ```js
 console.log(OlElevationProfile.version)

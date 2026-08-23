@@ -45,7 +45,7 @@
       display: flex; align-items: center; justify-content: center;
     }
     #panel {
-      position: absolute; top: 56px; right: 12px; z-index: 20; width: 248px;
+      position: absolute; top: 56px; right: 12px; z-index: 20; width: 380px;
       background: var(--panel); border: 1px solid var(--rule); border-radius: 10px;
       box-shadow: 0 4px 16px rgba(0,0,0,.12); padding: 10px 12px;
       font: 12px/1.4 ui-monospace, monospace; max-height: calc(100% - 70px); overflow: auto;
@@ -56,6 +56,7 @@
     .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 5px 0; }
     .row label { opacity: .8; }
     .row select, .row input[type=range] { width: 124px; }
+    .row select.dem { width: 160px; }
     .row input[type=range] { accent-color: var(--accent); }
     .row input[type=color] { width: 32px; height: 22px; padding: 0; border: 1px solid var(--rule); border-radius: 4px; background: #fff; }
     .val { opacity: .55; font-size: 11px; min-width: 38px; text-align: right; }
@@ -120,12 +121,19 @@
       <button data-flag="grid" class="on">grid</button>
       <button data-flag="collapsable" class="on">collapsable</button>
       <button data-flag="zoom">zoom A↔B</button>
+      <button data-flag="exportPng">export PNG</button>
     </div>
 
     <h2>Profile</h2>
     <div class="row"><label>smoothing (m)</label>
       <input type="range" id="smoothing" min="0" max="300" step="10" value="0"><span class="val" id="smoothing_v">off</span></div>
-    <div class="chk"><label><input type="checkbox" id="dem" checked> fill elevation from a DEM (AWS tiles, no key)</label></div>
+    <div class="row"><label>DEM (no Z)</label>
+      <select id="dem" class="dem">
+        <option value="terrarium">terrarium (AWS, world)</option>
+        <option value="ign">ign (RGE ALTI, France)</option>
+        <option value="custom">custom function</option>
+        <option value="off">off</option>
+      </select></div>
 
     <h2>Slope</h2>
     <div class="seg"><button data-flag="slope">enable slope</button></div>
@@ -219,7 +227,7 @@
       const hd = document.querySelector('#headerItems input[value=duration]');
       return (tt && tt.checked) || (hd && hd.checked);
     };
-    const demActive = () => document.getElementById('dem').checked;
+    const demActive = () => document.getElementById('dem').value !== 'off';
     const updateAlert = () => {
       const all = infoCache.concat(importedInfo ? [importedInfo] : []);
       // Avec le MNT actif, l'absence de Z dans le fichier n'est plus un manque : elle est
@@ -309,9 +317,20 @@
 
     // DEM: only applies to tracks without elevation. The alert follows the outcome -
     // filled means nothing is missing any more, failed is the only case worth reporting.
+    //
+    // 'custom' stands in for what a GeoServer WCS, a GeoTIFF or an in-house API would do:
+    // the application answers with the elevations itself. Here it fakes a gentle hill, so
+    // the hook is visible without a server to point at.
+    const DEM_SOURCES = {
+      terrarium: 'terrarium',
+      ign: 'ign',
+      custom: (lonlats) => lonlats.map((_, i) => 200 + 400 * Math.sin(Math.PI * i / lonlats.length)),
+      off: null
+    };
     document.getElementById('dem').onchange = function () {
-      profile.setOptions({ dem: this.checked || null });
-      updateAlert();                       // toggling it changes what counts as missing
+      // setOptions clears the cached Z, so the track on screen is re-filled at once.
+      profile.setOptions({ dem: DEM_SOURCES[this.value] });
+      updateAlert();                       // switching it changes what counts as missing
     };
     profile.on('demload', (e) => {
       const cur = infoCache.find((x) => x.label === currentLabel) || importedInfo;

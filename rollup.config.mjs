@@ -10,6 +10,7 @@ const globals = {
   'ol/control/Control.js': 'ol.control.Control',
   'ol/Overlay.js': 'ol.Overlay',
   'ol/Observable.js': 'ol.Observable',
+  'ol/TileState.js': 'ol.TileState',
   'ol/proj.js': 'ol.proj',
   'ol/sphere.js': 'ol.sphere',
   'ol/extent.js': 'ol.extent',

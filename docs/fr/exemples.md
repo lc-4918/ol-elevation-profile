@@ -22,7 +22,12 @@ const profile = new OlElevationProfile({
   dataProjection: null,             // null = projection de la vue | 'EPSG:4326' | Projection
   maxPoints: 2000,                  // décimation rendu/interaction (0 = aucune)
   smoothing: 0,                     // fenêtre de lissage de l'altitude, en mètres
-  dem: 'terrarium',                 // tuiles AWS | true | null = désactivé | { url, encoding, zoom, maxTiles }
+  dem: 'terrarium',                 // MNT complétant un tracé sans Z ; null = désactivé
+                                    //   'terrarium' | 'ign' | (lonlats) => number[]
+                                    //   | { url: '.../{z}/{x}/{y}.png', encoding: 'terrarium' }
+                                    //   | { wms: { url, layers } }
+                                    //   | { olSource }        // TileImage ou GeoTIFF
+                                    //   | { featureInfo: { url, layers, property } }
 
   // Apparence
   theme: 'steelblue',               // steelblue | lime | purple | slate | graphite | amber | {area,line,axis,text,focus}
@@ -49,6 +54,7 @@ const profile = new OlElevationProfile({
   marker: true,
   collapsable: true,
   collapsed: false,
+  exportPng: false,                 // bouton d'export du panneau en PNG
   zoom: false,                      // boutons de recadrage A/B
   ignoreStops: true,                // temps en mouvement (ignore les arrêts)
   stopSpeed: 0.5,                   // seuil d'arrêt en m/s
@@ -64,6 +70,7 @@ const profile = new OlElevationProfile({
     time: 'Temps', duration: 'Durée',
     durationUnits: { s: 'sec', m: 'min', h: 'h', d: 'j' },
     zoomStart: 'Définir le début (A)', zoomEnd: 'Définir la fin (B)', zoomAll: 'Tout voir',
+    exportPng: 'Exporter en PNG',
     loading: 'Chargement du profil altimétrique'
   }
 })
@@ -108,16 +115,86 @@ if (!OlElevationProfile.featureHasZ(feature)) {
 }
 ```
 
-## Compléter un tracé sans altitude
+## Modèle de terrain : toutes les sources
+
+`dem` complète un tracé sans Z. Actif par défaut (`'terrarium'`), inerte sur un tracé qui porte déjà ses altitudes, et `null` le désactive entièrement.
 
 ```js
-const profile = new OlElevationProfile();               // tuiles AWS par défaut, sans clé
+// 1. Défaut : AWS Terrain Tiles, mondial, sans clé, sans quota
+new OlElevationProfile();
 
-// Facultatif : savoir si le remplissage a réussi (c'est tout ou rien).
-profile.on('demload', (e) => console.log(e.ok, e.zoom, e.tiles));
+// 2. Désactivé : le contrôle ne touche jamais au réseau
+new OlElevationProfile({ dem: null });
 
-// N'importe quel jeu de tuiles XYZ en encodage terrarium ou mapbox convient :
+// 3. Géoplateforme IGN, France et outre-mer, au mètre, sans clé non plus.
+//    API de points : 200 points par requête, une requête par seconde.
+new OlElevationProfile({ dem: 'ign' });
+new OlElevationProfile({ dem: { source: 'ign', apiKey: 'seulement-si-votre-acces-en-exige-une' } });
+
+// 4. N'importe quel jeu XYZ, encodage terrarium ou mapbox
 new OlElevationProfile({
-  dem: { url: 'https://example.org/mnt/{z}/{x}/{y}.png', encoding: 'mapbox', maxZoom: 13 }
+  dem: { url: 'https://tuiles.example.org/mnt/{z}/{x}/{y}.png',
+         encoding: 'mapbox', maxZoom: 13, maxTiles: 48 }
+});
+
+// 5. Votre propre encodage : rendre null là où le pixel n'a pas de mesure
+new OlElevationProfile({
+  dem: { url: 'https://tuiles.example.org/mnt/{z}/{x}/{y}.png',
+         encoding: (r, g, b, a) => (a === 0 ? null : r * 256 + g - 32768) }
+});
+
+// 6. Tuiles WMS, un GetMap par tuile de la même grille
+new OlElevationProfile({
+  dem: { wms: { url: 'https://gs.example.org/geoserver/wms', layers: 'ws:mnt',
+                params: { VERSION: '1.1.1' } } }        // CRS bascule seul en SRS
+});
+
+// 7. Une source que la carte porte déjà : OpenLayers construit les URL
+new OlElevationProfile({ dem: { olSource: coucheMnt.getSource() } });
+
+// 8. Un GeoTIFF : COG en HTTP, ou un GetCoverage WCS. Des valeurs, pas des couleurs.
+import GeoTIFF from 'ol/source/GeoTIFF.js';
+new OlElevationProfile({
+  dem: { olSource: new GeoTIFF({ sources: [{ url: 'https://example.org/mnt.tif' }],
+                                 normalize: false }), band: 0 }
+});
+
+// 9. Une couverture en niveaux de gris accessible seulement en image :
+//    une requête par point, sans interpolation
+new OlElevationProfile({
+  dem: { featureInfo: { url: 'https://gs.example.org/geoserver/wms', layers: 'ws:mnt',
+                        property: 'GRAY_INDEX' }, concurrency: 8 }
+});
+
+// 10. Tout le reste : vous récupérez les altitudes, le contrôle garde la politique
+new OlElevationProfile({
+  dem: async (lonlats) => {
+    const r = await fetch('/api/altitudes', { method: 'POST', body: JSON.stringify(lonlats) });
+    return (await r.json()).elevations;     // une par point, dans le même ordre
+  }
 });
 ```
+
+Quelle que soit la source, un remplissage est tout ou rien, et `demload` en rend compte :
+
+```js
+profile.on('demload', (e) => {
+  if (!e.ok) console.warn('pas d\'altimétrie pour ce tracé');
+  else console.log(`rempli depuis ${e.tiles} tuiles au zoom ${e.zoom}`);   // zoom null, tiles 0 si non tuilé
+});
+```
+
+Voir [GeoServer, en pratique](/fr/guide/fonctions#geoserver-en-pratique) pour choisir entre les voies 6, 8 et 9, et le réglage CORS qu'elles exigent toutes.
+
+## Exporter le profil en PNG
+
+```js
+const profile = new OlElevationProfile({ exportPng: true });   // ajoute le bouton dans la barre
+
+await profile.exportPNG();                                     // enregistre le fichier
+await profile.exportPNG({ scale: 3, filename: 'etape-7.png' });
+const blob = await profile.exportPNG({ download: false });      // seulement le Blob
+```
+
+L'image reprend tout le panneau : titre, statistiques, légende et graphique. L'indicateur de position n'y figure pas.
+

@@ -22,7 +22,12 @@ const profile = new OlElevationProfile({
   dataProjection: null,             // null = view projection | 'EPSG:4326' | Projection
   maxPoints: 2000,                  // render/interaction decimation (0 = none)
   smoothing: 0,                     // elevation smoothing window, in metres
-  dem: 'terrarium',                 // AWS tiles | true | null = off | { url, encoding, zoom, maxTiles }
+  dem: 'terrarium',                 // terrain model filling a track with no Z; null = off
+                                    //   'terrarium' | 'ign' | (lonlats) => number[]
+                                    //   | { url: '.../{z}/{x}/{y}.png', encoding: 'terrarium' }
+                                    //   | { wms: { url, layers } }
+                                    //   | { olSource }        // TileImage or GeoTIFF
+                                    //   | { featureInfo: { url, layers, property } }
 
   // Appearance
   theme: 'steelblue',               // steelblue | lime | purple | slate | graphite | amber | {area,line,axis,text,focus}
@@ -49,6 +54,7 @@ const profile = new OlElevationProfile({
   marker: true,
   collapsable: true,
   collapsed: false,
+  exportPng: false,                 // toolbar button saving the panel as a PNG
   zoom: false,                      // A/B crop buttons
   ignoreStops: true,                // moving time (ignore stops)
   stopSpeed: 0.5,                   // m/s stop threshold
@@ -64,6 +70,7 @@ const profile = new OlElevationProfile({
     time: 'Temps', duration: 'Durée',
     durationUnits: { s: 'sec', m: 'min', h: 'h', d: 'j' },
     zoomStart: 'Définir le début (A)', zoomEnd: 'Définir la fin (B)', zoomAll: 'Tout voir',
+    exportPng: 'Exporter en PNG',
     loading: 'Chargement du profil altimétrique'
   }
 })
@@ -108,16 +115,85 @@ if (!OlElevationProfile.featureHasZ(feature)) {
 }
 ```
 
-## Fill a track that has no elevation
+## Terrain model: every source
+
+`dem` fills a track that carries no Z. It is on by default (`'terrarium'`), inert on a track that already has its own elevations, and `null` turns it off entirely.
 
 ```js
-const profile = new OlElevationProfile();               // AWS Terrain Tiles by default, no API key
+// 1. Default: AWS Terrain Tiles, worldwide, no key, no quota
+new OlElevationProfile();
 
-// Optional: know whether the fill succeeded (it is all-or-nothing).
-profile.on('demload', (e) => console.log(e.ok, e.zoom, e.tiles));
+// 2. Off: the control never touches the network
+new OlElevationProfile({ dem: null });
 
-// Any XYZ tile set in terrarium or mapbox encoding works instead:
+// 3. IGN Géoplateforme, France and overseas, metre-accurate, no key either.
+//    A point API: 200 points per request, one request per second.
+new OlElevationProfile({ dem: 'ign' });
+new OlElevationProfile({ dem: { source: 'ign', apiKey: 'only-if-your-endpoint-demands-one' } });
+
+// 4. Any XYZ tile set, terrarium or mapbox encoding
 new OlElevationProfile({
-  dem: { url: 'https://example.org/dem/{z}/{x}/{y}.png', encoding: 'mapbox', maxZoom: 13 }
+  dem: { url: 'https://tiles.example.org/dem/{z}/{x}/{y}.png',
+         encoding: 'mapbox', maxZoom: 13, maxTiles: 48 }
+});
+
+// 5. Your own encoding: return null where a pixel holds no measurement
+new OlElevationProfile({
+  dem: { url: 'https://tiles.example.org/dem/{z}/{x}/{y}.png',
+         encoding: (r, g, b, a) => (a === 0 ? null : r * 256 + g - 32768) }
+});
+
+// 6. WMS tiles, one GetMap per tile of the same grid
+new OlElevationProfile({
+  dem: { wms: { url: 'https://gs.example.org/geoserver/wms', layers: 'ws:dem',
+                params: { VERSION: '1.1.1' } } }        // CRS becomes SRS on its own
+});
+
+// 7. A source the map already holds: OpenLayers builds the URLs
+new OlElevationProfile({ dem: { olSource: demLayer.getSource() } });
+
+// 8. A GeoTIFF: COG over HTTP, or a WCS GetCoverage. Values, not colours.
+import GeoTIFF from 'ol/source/GeoTIFF.js';
+new OlElevationProfile({
+  dem: { olSource: new GeoTIFF({ sources: [{ url: 'https://example.org/dem.tif' }],
+                                 normalize: false }), band: 0 }
+});
+
+// 9. A greyscale coverage reachable only as an image: one request per point, no interpolation
+new OlElevationProfile({
+  dem: { featureInfo: { url: 'https://gs.example.org/geoserver/wms', layers: 'ws:dem',
+                        property: 'GRAY_INDEX' }, concurrency: 8 }
+});
+
+// 10. Anything else: you fetch the elevations, the control keeps the policy
+new OlElevationProfile({
+  dem: async (lonlats) => {
+    const r = await fetch('/api/elevations', { method: 'POST', body: JSON.stringify(lonlats) });
+    return (await r.json()).elevations;     // one per point, same order
+  }
 });
 ```
+
+Whatever the source, a fill is all or nothing, and `demload` reports the outcome:
+
+```js
+profile.on('demload', (e) => {
+  if (!e.ok) console.warn('no elevation for this track');
+  else console.log(`filled from ${e.tiles} tiles at zoom ${e.zoom}`);   // zoom null, tiles 0 if not tiled
+});
+```
+
+See [GeoServer, in practice](/guide/features#geoserver-in-practice) for which of routes 6, 8 and 9 to pick, and the CORS setting they all need.
+
+## Export the profile as a PNG
+
+```js
+const profile = new OlElevationProfile({ exportPng: true });   // adds the toolbar button
+
+await profile.exportPNG();                                     // saves the file
+await profile.exportPNG({ scale: 3, filename: 'stage-7.png' });
+const blob = await profile.exportPNG({ download: false });      // Blob only, nothing saved
+```
+
+The image covers the whole panel: title, stats, legend and chart. The position indicator is left out.
+

@@ -3,14 +3,14 @@ layout: home
 hero:
   name: ol-elevation-profile
   text: Profils altimétriques pour OpenLayers
-  tagline: Un contrôle de profil altimétrique synchronisé et thématisable, rendu avec d3, qui lit l'altitude directement dans vos GPX/GeoJSON 3D — et dans des tuiles de terrain sans clé quand ils n'en portent pas.
+  tagline: Un contrôle de profil altimétrique synchronisé et thématisable, rendu avec d3, qui lit l'altitude directement dans vos GPX/GeoJSON 3D et dans des tuiles de terrain sans clé quand ils n'en portent pas.
   image:
     src: /screenshot-profile.png
     alt: Profil altimétrique coloré par classe de pente
   actions:
     - theme: brand
       text: Démarrage
-      link: /fr/guide/demarrage
+      link: /fr/guide/getting-started
     - theme: alt
       text: Démo en ligne
       link: https://lc-4918.github.io/ol-elevation-profile/demo/

@@ -1,6 +1,6 @@
 # Démarrage
 
-`ol-elevation-profile` est un contrôle OpenLayers qui dessine un profil altimétrique synchronisé pour un tracé dont la géométrie porte l'altitude (`[lon, lat, z]`). Un tracé **sans** Z est complété depuis un modèle numérique de terrain — des tuiles AWS sans clé, **actives par défaut**, que le contrôle va donc chercher de lui-même ; `dem: null` le désactive. Il a besoin d'**OpenLayers** et de **d3** déjà présents — il ne les embarque jamais.
+`ol-elevation-profile` est un contrôle OpenLayers qui dessine un profil altimétrique synchronisé pour un tracé dont la géométrie porte l'altitude (`[lon, lat, z]`). Un tracé **sans** Z est complété depuis un modèle numérique de terrain : des tuiles AWS sans clé, **actives par défaut**, que le contrôle va donc chercher de lui-même. `dem: null` le désactive. Il a besoin d'**OpenLayers** et de **d3** déjà présents ; il ne les embarque jamais.
 
 ## Compatibilité
 
@@ -57,7 +57,7 @@ Cliquez un tracé (ou survolez, avec `show: 'mouseover'`), déplacez-vous sur la
 
 ## Formats supportés
 
-Le contrôle ne consomme que des `Feature` OpenLayers : **tout format lisible par OpenLayers fonctionne** — GeoJSON, GPX, KML, etc. On lit du GPX ou du KML exactement pareil :
+Le contrôle ne consomme que des `Feature` OpenLayers : **tout format lisible par OpenLayers fonctionne**, GeoJSON, GPX, KML, etc. On lit du GPX ou du KML exactement pareil :
 
 ```js
 const feats = new ol.format.GPX().readFeatures(text, {

@@ -3,7 +3,7 @@ layout: home
 hero:
   name: ol-elevation-profile
   text: Elevation profiles for OpenLayers
-  tagline: A synchronized, themeable elevation profile control rendered with d3 — reading elevation straight from your 3D GPX/GeoJSON, and from keyless terrain tiles when they carry none.
+  tagline: A synchronized, themeable elevation profile control rendered with d3, reading elevation straight from your 3D GPX/GeoJSON and from keyless terrain tiles when they carry none.
   image:
     src: /screenshot-profile.png
     alt: Elevation profile coloured by slope class

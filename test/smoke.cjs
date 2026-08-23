@@ -10,12 +10,18 @@ const d3 = d3box.d3;
 const dom = new JSDOM('<!doctype html><body></body>');
 const document = dom.window.document;
 
-class Control { constructor(o){ this.element = o.element; } setMap(m){ this._map = m; } getMap(){ return this._map; } }
+class Control {
+  constructor(o){ this.element = o.element; }
+  setMap(m){ this._map = m; } getMap(){ return this._map; }
+  // ol/Observable in miniature: _demDone emits `demload` through it.
+  on(t, f){ (this._h = this._h || {})[t] = (this._h[t] || []).concat(f); }
+  dispatchEvent(e){ ((this._h || {})[e.type] || []).forEach((f) => f(e)); }
+}
 const ol = {
   control: { Control },
   Overlay: class { constructor(){} setPosition(){} },
   Observable: { unByKey(){} },
-  proj: { toLonLat: (c) => [c[0], c[1]] },
+  proj: { toLonLat: (c) => [c[0], c[1]], fromLonLat: (c) => [c[0], c[1]], get: (code) => ({ code }) },
   sphere: { getDistance: (a, b) => Math.hypot(a[0]-b[0], a[1]-b[1]) * 100000 },
   extent: { boundingExtent: (cs) => { let a=[Infinity,Infinity,-Infinity,-Infinity]; for(const c of cs){a[0]=Math.min(a[0],c[0]);a[1]=Math.min(a[1],c[1]);a[2]=Math.max(a[2],c[0]);a[3]=Math.max(a[3],c[1]);} return a; } }
 };
@@ -34,7 +40,25 @@ const feature2d = { getGeometry: () => geom2d, get: () => null, getProperties: (
 const trackLayer = { getStyle: () => ({ getStroke: () => ({ getColor: () => '#c4541a' }) }) };
 
 const code = fs.readFileSync(path.join(root, 'dist/ol-elevation-profile.js'), 'utf8');
-const sandbox = { ol, d3, document, window: dom.window, getComputedStyle: dom.window.getComputedStyle, console };
+// Stubs settable by the async tests below: `fetch` for the point APIs, `Image` plus a
+// canvas for the tile path. Nothing here reaches the network.
+const stub = { fetch: null, tileUrls: null, pixel: [128, 0, 0, 255] };
+class FakeImage {
+  set src(u) { if (stub.tileUrls) stub.tileUrls.push(u); setTimeout(() => this.onload && this.onload(), 0); }
+}
+const fakeCanvas = () => ({ width: 0, height: 0, getContext: () => ({
+  drawImage() {},
+  getImageData: (x, y, w, h) => ({ data: (() => { const d = new Uint8ClampedArray(w * h * 4);
+    for (let i = 0; i < w * h; i++) { d[i*4] = stub.pixel[0]; d[i*4+1] = stub.pixel[1];
+      d[i*4+2] = stub.pixel[2]; d[i*4+3] = stub.pixel[3]; } return d; })() })
+}) });
+const sandbox = { ol, d3, document, window: dom.window, getComputedStyle: dom.window.getComputedStyle, console,
+  setTimeout, clearTimeout, fetch: (...a) => stub.fetch(...a), Image: FakeImage,
+  XMLSerializer: dom.window.XMLSerializer, URL: dom.window.URL };
+// The tile path builds its canvas through document.createElement.
+const realCreate = dom.window.document.createElement.bind(dom.window.document);
+sandbox.document = new Proxy(dom.window.document, { get: (t, k) =>
+  k === 'createElement' ? ((tag) => tag === 'canvas' ? fakeCanvas() : realCreate(tag)) : Reflect.get(t, k) });
 vm.createContext(sandbox);
 vm.runInContext(code, sandbox);
 const Profile = sandbox.OlElevationProfile;
@@ -173,6 +197,51 @@ check('chart returns once loaded', pSpin.element.querySelectorAll('.oep-spinner'
 check('stats return once loaded', pSpin._statsEl.innerHTML !== '');
 
 
+// ---- PNG export -------------------------------------------------------------
+// The image cannot be rasterised here (jsdom has no canvas), so what is checked is the
+// SVG the export builds - which is where the traps are: a serialized SVG carries no
+// stylesheet, and the pointer indicator has no business in a saved file.
+const pPng = new Profile({ exportPng: true, slope: true });
+pPng.setMap(map); pPng.setFeature(feature);
+const built = pPng._exportSvg();
+check('export: builds an SVG', !!built && /^<svg xmlns=/.test(built.svg));
+
+const parsed = new dom.window.DOMParser().parseFromString(built.svg, 'image/svg+xml');
+check('export: the SVG is well formed', parsed.querySelector('parsererror') === null);
+
+check('export: carries the title', built.svg.indexOf('Test track') >= 0);
+check('export: carries the stats line', built.svg.indexOf(pPng._statsEl.textContent) >= 0);
+check('export: carries the chart', /oep-line|oep-area/.test(built.svg));
+// The indicator marks where the pointer happens to be: meaningless once saved.
+check('export: drops the position indicator', built.svg.indexOf('oep-focus') === -1);
+check('export: drops the hit-test overlay', built.svg.indexOf('oep-overlay') === -1);
+// Painting styles are frozen inline, or the export would come out as black shapes.
+check('export: styles frozen inline', /<path[^>]*style="/.test(built.svg));
+// The frame must hold the header as well as the chart, not the chart alone.
+const chartH = +pPng.element.querySelector('svg.oep-svg').getAttribute('height');
+check('export: taller than the chart alone (header included)', built.height > chartH + 20);
+// A nested <svg> without width/height fills the parent viewport: the chart would be
+// stretched over the header's height too.
+check('export: inner chart keeps its own size',
+      new RegExp('<svg[^>]*width="' + chartH.toString().replace(/\d+/, String(+pPng.element.querySelector('svg.oep-svg').getAttribute('width'))) + '"').test(built.svg) &&
+      built.svg.indexOf('height="' + chartH + '"') > 0);
+check('export: wider than the chart (padding)', built.width > +pPng.element.querySelector('svg.oep-svg').getAttribute('width'));
+
+// The button lives in the toolbar, to the right of the zoom buttons.
+const tb = [...pPng._toolbar.children];
+check('export: button is last in the toolbar', tb[tb.length - 1] === pPng._btnPng);
+check('export: button shown when enabled', pPng._btnPng.style.display === '' && pPng._toolbar.style.display === '');
+const pNoPng = new Profile({});
+pNoPng.setMap(map); pNoPng.setFeature(feature);
+check('export: button hidden when disabled', pNoPng._btnPng.style.display === 'none');
+// Neither option on: the toolbar itself goes away, as before.
+check('export: toolbar still hidden with neither option', pNoPng._toolbar.style.display === 'none');
+const pOnlyPng = new Profile({ exportPng: true });
+pOnlyPng.setMap(map); pOnlyPng.setFeature(feature);
+check('export: toolbar appears for export alone', pOnlyPng._toolbar.style.display === '' &&
+      pOnlyPng._btnA.style.display === 'none');
+
+
 // ---- collapsed mode ---------------------------------------------------------
 // The title is the ONLY thing the CSS leaves visible once collapsed, and `_render` is
 // skipped in that state: a change of feature used to leave the previous track's name on
@@ -270,4 +339,128 @@ check('DEM: dem null disables it', new Profile({ dem: null }).options.dem === nu
 check('DEM: terrarium preset needs no key', /elevation-tiles-prod/.test(Profile.DEM_PRESETS.terrarium.url) &&
       !/key|token|api/i.test(Profile.DEM_PRESETS.terrarium.url));
 
-console.log(ok ? '\n>>> ALL TESTS PASS' : '\n>>> FAILURES'); process.exit(ok?0:1);
+// ---- custom samplers and the IGN source (async) -----------------------------
+// The `sample` hook is what lets an application reach a GeoServer coverage, a GeoTIFF or
+// a national API without this library carrying a decoder for any of them. It has to keep
+// the same contract as the tile path: all or nothing, and never leave the spinner up.
+const feat2d = mkFeat(mkGeom('LineString', [[6.0,45.0],[6.1,45.1],[6.2,45.2]]));
+const fillWith = (dem, feature) => new Promise((resolve) => {
+  const q = new Profile({ dem });
+  q.setMap(map);
+  q.on('demload', (e) => resolve({ e, q }));
+  q.setFeature(feature || feat2d);
+});
+
+(async () => {
+  let r = await fillWith((lonlats) => lonlats.map((_, i) => 100 + i * 10));
+  check('sampler: a function fills the profile', r.e.ok === true && r.q.getStats().max === 120);
+  check('sampler: zoom/tiles are null/0 for a custom source', r.e.zoom === null && r.e.tiles === 0);
+  check('sampler: spinner cleared afterwards', r.q._demLoading === false);
+
+  r = await fillWith({ sample: (ll) => Promise.resolve(ll.map(() => 42)) });
+  check('sampler: {sample} form, and a promise', r.e.ok === true && r.q.getStats().min === 42);
+
+  // A result of the wrong length is refused rather than padded: elevations one can no
+  // longer map to their points would land on the wrong places, silently.
+  r = await fillWith(() => [100, 200]);
+  check('sampler: wrong length refused', r.e.ok === false && r.q.getStats().max === 0);
+
+  r = await fillWith((ll) => ll.map((_, i) => (i === 1 ? null : 100)));
+  check('sampler: one missing point abandons the fill', r.e.ok === false);
+
+  r = await fillWith(() => { throw new Error('boom'); });
+  check('sampler: a throwing source fails cleanly', r.e.ok === false && r.q._demLoading === false);
+
+  // ---- IGN Géoplateforme, on a stubbed fetch --------------------------------
+  const calls = [];
+  const reply = (values) => (url) => { calls.push(url);
+    const n = url.match(/lon=([^&]*)/)[1].split('|').length;
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ elevations: values(n) }) }); };
+
+  stub.fetch = reply((n) => Array.from({ length: n }, (_, i) => 200 + i));
+  r = await fillWith({ source: 'ign', minInterval: 0 });
+  check('IGN: fills from the point API', r.e.ok === true && r.q.getStats().min === 200);
+  check('IGN: queries the Géoplateforme', /data\.geopf\.fr\/altimetrie/.test(calls[0]));
+  check('IGN: asks for elevations only', /zonly=true/.test(calls[0]) && /resource=ign_rge_alti_wld/.test(calls[0]));
+  check('IGN: no key in the URL by default', !/apikey/i.test(calls[0]));
+
+  calls.length = 0;
+  r = await fillWith({ source: 'ign', minInterval: 0, apiKey: 'S3CR3T' });
+  check('IGN: apiKey appended when given', /apikey=S3CR3T/.test(calls[0]));
+
+  // -99999 is what the service answers outside its coverage - a track straddling the
+  // border must fail rather than sit at minus one hundred thousand metres.
+  calls.length = 0;
+  stub.fetch = reply((n) => Array.from({ length: n }, (_, i) => (i === 0 ? -99999 : 300)));
+  r = await fillWith({ source: 'ign', minInterval: 0 });
+  check('IGN: out of coverage (-99999) is not an altitude', r.e.ok === false && r.q.getStats().min === 0);
+
+  // 200 points per request: beyond that the URL hits a 414 from intermediate servers.
+  calls.length = 0;
+  stub.fetch = reply((n) => Array.from({ length: n }, () => 500));
+  const many = Array.from({ length: 250 }, (_, i) => [6 + i * 1e-4, 45 + i * 1e-4]);
+  r = await fillWith({ source: 'ign', minInterval: 0 }, mkFeat(mkGeom('LineString', many)));
+  check('IGN: batched 200 points per request', calls.length === 2 && r.e.ok === true);
+
+
+  // ---- tile sources: XYZ, WMS, ol/source, custom decoding --------------------
+  // stub.pixel is what every tile pixel holds; terrarium reads 128,0,0 as 0 m.
+  const grab = async (dem, feature) => { stub.tileUrls = []; const out = await fillWith(dem, feature);
+    return { ...out, urls: stub.tileUrls }; };
+
+  let t = await grab({ url: 'https://tiles.example/{z}/{x}/{y}.png', maxZoom: 10 });
+  check('XYZ: template expanded', t.e.ok === true && /^https:\/\/tiles\.example\/\d+\/\d+\/\d+\.png$/.test(t.urls[0]));
+
+  // A WMS stands in for the tile template: one GetMap per tile of the same grid.
+  t = await grab({ wms: { url: 'https://gs.example/wms', layers: 'dem' }, maxZoom: 10 });
+  check('WMS: GetMap request built', /REQUEST=GetMap/.test(t.urls[0]) && /LAYERS=dem/.test(t.urls[0]));
+  check('WMS: 1.3.0 uses CRS, not SRS', /CRS=EPSG%3A3857/.test(t.urls[0]) && !/[?&]SRS=/.test(t.urls[0]));
+  check('WMS: bbox spans the tile', /BBOX=-?\d[\d.,-]+/.test(t.urls[0]) && /WIDTH=256/.test(t.urls[0]));
+
+  // 1.1.1 names the same thing SRS. Sending CRS there gets the request rejected.
+  t = await grab({ wms: { url: 'https://gs.example/wms', layers: 'dem', params: { VERSION: '1.1.1' } }, maxZoom: 10 });
+  check('WMS: 1.1.1 switches to SRS', /SRS=EPSG%3A3857/.test(t.urls[0]) && !/[?&]CRS=/.test(t.urls[0]));
+
+  // An ol/source/TileImage delegates URL building to OpenLayers itself.
+  const olSource = { getTileUrlFunction: () => (tc) => `ol://${tc[0]}/${tc[1]}/${tc[2]}` };
+  t = await grab({ olSource, maxZoom: 10 });
+  check('ol source: URL function delegated', t.e.ok === true && /^ol:\/\/\d+\/\d+\/\d+$/.test(t.urls[0]));
+
+  // Custom decoding: the same pixels, read another way.
+  stub.pixel = [10, 20, 30, 255];
+  t = await grab({ url: 'https://tiles.example/{z}/{x}/{y}.png', maxZoom: 10, encoding: (r, g, b) => r * 100 + g + b / 100 });
+  check('encoding: a function decodes the pixels', t.e.ok === true && Math.abs(t.q.getStats().min - 1020.3) < 0.01);
+
+  // A decoder returning null means no measurement, not zero metres.
+  t = await grab({ url: 'https://tiles.example/{z}/{x}/{y}.png', maxZoom: 10, encoding: () => null });
+  check('encoding: null is refused, not read as 0 m', t.e.ok === false);
+  stub.pixel = [128, 0, 0, 255];
+
+  // ---- GetFeatureInfo: one request per point --------------------------------
+  const fiCalls = [];
+  stub.fetch = (url) => { fiCalls.push(url);
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ features: [{ properties: { GRAY_INDEX: 812.5 } }] }) }); };
+  r = await fillWith({ featureInfo: { url: 'https://gs.example/wms', layers: 'mnt' } });
+  check('GetFeatureInfo: fills from band values', r.e.ok === true && r.q.getStats().min === 812.5);
+  check('GetFeatureInfo: one request per point', fiCalls.length === 3);
+  check('GetFeatureInfo: queries the layer', /REQUEST=GetFeatureInfo/.test(fiCalls[0]) && /QUERY_LAYERS=mnt/.test(fiCalls[0]));
+  check('GetFeatureInfo: one pixel box', /WIDTH=1/.test(fiCalls[0]) && /HEIGHT=1/.test(fiCalls[0]) && /[?&]I=0/.test(fiCalls[0]));
+
+  // The band property is not standard; an explicit name must win over the first number.
+  stub.fetch = () => Promise.resolve({ ok: true, json: () => Promise.resolve({ features: [{ properties: { id: 7, ELEV: 250 } }] }) });
+  r = await fillWith({ featureInfo: { url: 'https://gs.example/wms', layers: 'mnt', property: 'ELEV' } });
+  check('GetFeatureInfo: named property wins', r.e.ok === true && r.q.getStats().min === 250);
+  r = await fillWith({ featureInfo: { url: 'https://gs.example/wms', layers: 'mnt' } });
+  check('GetFeatureInfo: first number otherwise', r.e.ok === true && r.q.getStats().min === 7);
+
+  // A source that throws on construction must not take setFeature down with it: the fill
+  // is a supplement, and a profile that worked without it has to keep working.
+  const pBad = new Profile({ dem: { olSource: { getTileUrlFunction: () => { throw new Error('nope'); } } } });
+  pBad.setMap(map);
+  let threw = false;
+  try { pBad.setFeature(feat2d); } catch (e) { threw = true; }
+  check('source: a throwing source does not break setFeature', threw === false);
+  check('source: the profile is still drawn', pBad.element.style.display === '');
+
+  console.log(ok ? '\n>>> ALL TESTS PASS' : '\n>>> FAILURES'); process.exit(ok ? 0 : 1);
+})();

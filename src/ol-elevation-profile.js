@@ -17,7 +17,8 @@
 import Control from 'ol/control/Control.js';
 import Overlay from 'ol/Overlay.js';
 import { unByKey } from 'ol/Observable.js';
-import { toLonLat } from 'ol/proj.js';
+import { toLonLat, fromLonLat, transform, get as getProj } from 'ol/proj.js';
+import TileState from 'ol/TileState.js';
 import { getDistance } from 'ol/sphere.js';
 import { boundingExtent } from 'ol/extent.js';
 import * as d3 from 'd3';
@@ -67,6 +68,7 @@ import * as d3 from 'd3';
     responsive: true,             // adapts width/placement, mobile included
     mobileBreakpoint: 640,        // <= screen width -> mobile mode (100% width, top/bottom)
     zoom: false,                  // start/end buttons cropping map + profile to A..B
+    exportPng: false,             // toolbar button exporting the panel as a PNG
     ignoreStops: true,            // duration = moving time (stops excluded)
     stopSpeed: 0.5,               // stop threshold in m/s (~1.8 km/h)
     tooltipItems: ['distance', 'elevation'],
@@ -79,6 +81,7 @@ import * as d3 from 'd3';
       time: 'Temps', duration: 'Durée',
       durationUnits: { s: 'sec', m: 'min', h: 'h', d: 'j' },
       zoomStart: 'Définir le début (A)', zoomEnd: 'Définir la fin (B)', zoomAll: 'Tout voir',
+      exportPng: 'Exporter en PNG',
       loading: 'Chargement du profil altimétrique'
     }
   };
@@ -184,6 +187,7 @@ import * as d3 from 'd3';
   const ICON_EXPAND = '<svg viewBox="0 0 24 24"><path d="M3 19l5-7 4 4 4-6 5 9z" fill="currentColor" opacity=".85"/></svg>';
   const ICON_A = '<svg viewBox="0 0 24 24"><path d="M7 5v14M11 12h8m0 0-3-3m3 3-3 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   const ICON_B = '<svg viewBox="0 0 24 24"><path d="M17 5v14M13 12H5m0 0 3-3m-3 3 3 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const ICON_PNG = '<svg viewBox="0 0 24 24"><path d="M12 4v10m0 0 4-4m-4 4-4-4M5 18h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   const ICON_ALL = '<svg viewBox="0 0 24 24"><path d="M4 12h16M4 12l4-4M4 12l4 4M20 12l-4-4M20 12l-4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
   // ----- digital elevation model (DEM) -----------------------------------
@@ -206,16 +210,334 @@ import * as d3 from 'd3';
       encoding: 'terrarium',
       maxZoom: 14,
       attributions: 'Elevation: <a href="https://registry.opendata.aws/terrain-tiles/">Terrain Tiles</a> (AWS Open Data)'
+    },
+    /**
+     * IGN Géoplateforme, serving the RGE ALTI over France and its overseas territories.
+     *
+     * A point API rather than tiles, hence its own sampler: it answers 200 points per
+     * request and announces one request per second, so a 10 000 point track takes about
+     * fifty calls spread over as many seconds. In exchange it is metre-accurate where the
+     * world models are at ninety.
+     *
+     * **No key is required** on the public endpoint - verified against the live service.
+     * `apiKey` exists for a deployment that does demand one; it is appended as a query
+     * parameter, named by `apiKeyParam`.
+     *
+     * Outside its coverage the service does not error: it answers OUT_OF_COVERAGE for the
+     * point. No border is coded here - one asks, and it says itself where it does not know.
+     */
+    ign: {
+      api: 'ign',
+      url: 'https://data.geopf.fr/altimetrie/1.0/calcul/alti/rest/elevation.json',
+      resource: 'ign_rge_alti_wld',
+      batch: 200,            // more fits, but the URL grows ~20 bytes a point and hits 414
+      minInterval: 1100,     // ms between calls; the service announces 1 req/s
+      attributions: 'Elevation: <a href="https://geoservices.ign.fr/rgealti">RGE ALTI</a> (IGN)'
     }
   };
 
+  /** Value the IGN service returns where it holds no measurement. */
+  const IGN_NO_DATA = -99999;
+
+  /**
+   * Request URL for one batch, in the order given: the response returns the elevations in
+   * the same one.
+   *
+   * `zonly=true` cuts the response down to the elevations alone, without echoing the
+   * coordinates - a third of the weight for the same information. Coordinates rounded to
+   * the millionth of a degree, about ten centimetres: beyond that one only adds digits to
+   * the URL.
+   */
+  function ignUrl(cfg, pts) {
+    const f = (v) => v.toFixed(6);
+    const sep = cfg.url.indexOf('?') >= 0 ? '&' : '?';
+    let u = cfg.url + sep + 'resource=' + encodeURIComponent(cfg.resource) +
+      '&delimiter=|&zonly=true' +
+      '&lon=' + pts.map((p) => f(p[0])).join('|') +
+      '&lat=' + pts.map((p) => f(p[1])).join('|');
+    if (cfg.apiKey) u += '&' + (cfg.apiKeyParam || 'apikey') + '=' + encodeURIComponent(cfg.apiKey);
+    return u;
+  }
+
+  /**
+   * Sampler for the IGN service: batches, paces, and maps out-of-coverage to null.
+   *
+   * A batch whose response does not carry exactly as many elevations as points were asked
+   * for fails the whole fill. Elevations one can no longer map to their points are worse
+   * than absent ones: they would land on the wrong places, silently.
+   */
+  function ignSampler(cfg) {
+    const size = Math.max(1, cfg.batch || 200);
+    const gap = cfg.minInterval || 0;
+    return (lonlats) => {
+      const out = [];
+      let last = 0;
+      const step = (i) => {
+        if (i >= lonlats.length) return Promise.resolve(out);
+        const chunk = lonlats.slice(i, i + size);
+        const wait = Math.max(0, gap - (Date.now() - last));
+        return new Promise((r) => setTimeout(r, wait))
+          .then(() => { last = Date.now(); return fetch(ignUrl(cfg, chunk)); })
+          .then((r) => (r && r.ok) ? r.json() : null)
+          .then((body) => {
+            const z = body && body.elevations;
+            if (!Array.isArray(z) || z.length !== chunk.length) return null;
+            for (const v of z) out.push((v == null || v <= IGN_NO_DATA) ? null : v);
+            return step(i + size);
+          });
+      };
+      return step(0);
+    };
+  }
+
   const DEM_DEFAULTS = { source: 'terrarium', zoom: 'auto', maxZoom: 14, maxTiles: 32, concurrency: 6, tileSize: 256 };
 
-  /** RGB → metres decoders, one per encoding convention. */
+  /**
+   * RGB → metres decoders, one per encoding convention.
+   *
+   * `encoding` also takes a function `(r, g, b, a) => metres`, for a tile set that packs
+   * elevation its own way. Return null where the pixel carries no measurement: the fill is
+   * abandoned rather than guessed.
+   *
+   * A GeoServer greyscale DEM is NOT decoded here. What a WMS returns is a rendered image,
+   * stretched and quantised by its style, not the coverage values; reading it back would
+   * be reading the rendering. Those go through `featureInfo`, which asks the server for the
+   * band value itself (see demConfig).
+   */
   const DEM_DECODERS = {
     terrarium: (r, g, b) => (r * 256 + g + b / 256) - 32768,
     mapbox: (r, g, b) => -10000 + (r * 65536 + g * 256 + b) * 0.1
   };
+
+  /** Half the Web Mercator world, in metres: the bound of EPSG:3857. */
+  const MERC_HALF = 20037508.342789244;
+
+  /** Extent of an XYZ tile in EPSG:3857, for the WMS requests built below. */
+  function tileExtent(z, x, y) {
+    const span = 2 * MERC_HALF / Math.pow(2, z);
+    const minX = -MERC_HALF + x * span, maxY = MERC_HALF - y * span;
+    return [minX, maxY - span, minX + span, maxY];
+  }
+
+  function query(base, params) {
+    const sep = base.indexOf('?') >= 0 ? '&' : '?';
+    return base.replace(/[?&]$/, '') + sep +
+      Object.keys(params).map((k) => k + '=' + encodeURIComponent(params[k])).join('&');
+  }
+
+  /**
+   * WMS GetMap URL covering one XYZ tile, so a WMS behaves like any other tile source.
+   *
+   * The axis-order trap: WMS 1.3.0 names the reference system `CRS`, 1.1.1 names it `SRS`,
+   * and sending the wrong one gets the request rejected or silently mis-georeferenced.
+   * The version actually in force decides, after the caller's params are merged in.
+   */
+  function wmsTileUrl(w, z, x, y, tileSize) {
+    const p = Object.assign({
+      SERVICE: 'WMS', REQUEST: 'GetMap', VERSION: '1.3.0', FORMAT: 'image/png',
+      TRANSPARENT: 'false', STYLES: ''
+    }, w.params || {});
+    const key = String(p.VERSION).indexOf('1.1') === 0 ? 'SRS' : 'CRS';
+    delete p.SRS; delete p.CRS;
+    p[key] = w.projection || 'EPSG:3857';
+    p.LAYERS = w.layers;
+    p.WIDTH = tileSize; p.HEIGHT = tileSize;
+    p.BBOX = tileExtent(z, x, y).join(',');
+    return query(w.url, p);
+  }
+
+  /**
+   * Where a tile comes from: an OpenLayers source, a WMS, or an XYZ template.
+   *
+   * Handing an `ol/source/TileImage` (XYZ, TileWMS, or any subclass) delegates URL building
+   * to OpenLayers itself, which already knows that source's quirks - subdomains, custom
+   * params, tile grid. Cheaper and safer than reimplementing each one here.
+   */
+  function tileUrlFn(cfg) {
+    const src = cfg.olSource;
+    if (src && typeof src.getTileUrlFunction === 'function') {
+      const fn = src.getTileUrlFunction();
+      const proj = getProj('EPSG:3857');
+      return (z, x, y) => fn([z, x, y], 1, proj);
+    }
+    if (cfg.wms) return (z, x, y) => wmsTileUrl(cfg.wms, z, x, y, cfg.tileSize);
+    return (z, x, y) => cfg.url.replace('{z}', z).replace('{x}', x).replace('{y}', y);
+  }
+
+  /**
+   * Values of one DataTile, or null if it never arrived.
+   *
+   * A DataTile carries no URL: it is loaded by the source itself and its values are read
+   * back with getData(). The state has to be watched rather than awaited - OpenLayers
+   * announces it through a `change` event, not a promise.
+   */
+  function loadDataTile(tile) {
+    return new Promise((resolve) => {
+      const settle = () => {
+        const st = tile.getState();
+        if (st === TileState.LOADED) { resolve(tile.getData ? tile.getData() : null); return true; }
+        if (st === TileState.ERROR || st === TileState.EMPTY) { resolve(null); return true; }
+        return false;
+      };
+      if (settle()) return;
+      const onChange = () => { if (settle()) tile.removeEventListener('change', onChange); };
+      tile.addEventListener('change', onChange);
+      if (tile.load) tile.load();
+    });
+  }
+
+  /**
+   * Sampler for an `ol/source/DataTile` - `ol/source/GeoTIFF` above all.
+   *
+   * Its own path because such a source shares nothing with the XYZ one: no URL, no Web
+   * Mercator, no 256 pixel tiles. A GeoTIFF keeps **its own projection and its own tile
+   * grid**, both only known once `getView()` has resolved, and its values are real numbers
+   * rather than colours - so nothing here goes through a decoder.
+   *
+   * Positions are held in grid pixels, as with the XYZ tiles and for the same reason: the
+   * four neighbours of a point straddle two tiles as soon as it runs along an edge.
+   *
+   * `normalize: false` matters on the source, otherwise OpenLayers rescales the values to
+   * 0..1 and the profile comes out in fractions of nothing.
+   */
+  function dataTileSampler(cfg) {
+    const src = cfg.olSource;
+    const band = cfg.band || 0;
+    return (lonlats) => {
+      // getView() is only awaited when the grid is not known yet - which is the GeoTIFF
+      // case, where it settles once the metadata has been read. On a plain DataTile that
+      // promise never settles at all, and awaiting it unconditionally hangs the fill.
+      const known = src.getTileGrid && src.getTileGrid();
+      const ready = known ? Promise.resolve(null) : Promise.resolve(src.getView ? src.getView() : null);
+      return ready.then((view) => {
+      const grid = known || (src.getTileGrid && src.getTileGrid()) || (view && view.tileGrid);
+      if (!grid) return null;
+      const proj = getProj((view && view.projection) || (src.getProjection && src.getProjection()) || 'EPSG:3857');
+      const zs = grid.getResolutions ? grid.getResolutions().length - 1 : 0;
+      const bands = src.bandCount || 1;
+      const coords = lonlats.map((ll) => transform([ll[0], ll[1]], 'EPSG:4326', proj));
+
+      // Finest level whose tile count stays within maxTiles, as for the XYZ tiles: it is
+      // the tiling that widens with the track, not the model that degrades.
+      // Pixel bounds of the coverage, when it declares an extent. A point inside the raster
+      // but within half a pixel of its edge lands on a neighbour that does not exist: its
+      // tile would come back empty and the all-or-nothing rule would drop the whole track.
+      // Half a pixel of tolerance at the borders, as on any regular grid.
+      const ext = (grid.getExtent && grid.getExtent()) || (view && view.extent) || null;
+      const plan = (z) => {
+        const res = grid.getResolution(z), origin = grid.getOrigin(z);
+        let ts = grid.getTileSize(z); ts = Array.isArray(ts) ? ts : [ts, ts];
+        const cols = ext ? Math.round((ext[2] - ext[0]) / res) : Infinity;
+        const rows = ext ? Math.round((ext[3] - ext[1]) / res) : Infinity;
+        const clampI = (i) => Math.min(cols - 1, Math.max(0, i));
+        const clampJ = (j) => Math.min(rows - 1, Math.max(0, j));
+        const need = new Map();
+        const at = coords.map((c) => {
+          const px = (c[0] - origin[0]) / res - 0.5, py = (origin[1] - c[1]) / res - 0.5;
+          const i0 = clampI(Math.floor(px)), j0 = clampJ(Math.floor(py));
+          for (let di = 0; di < 2; di++) for (let dj = 0; dj < 2; dj++) {
+            const tx = Math.floor(clampI(i0 + di) / ts[0]), ty = Math.floor(clampJ(j0 + dj) / ts[1]);
+            need.set(tx + '/' + ty, [tx, ty]);
+          }
+          // Interpolation fractions clamped too: a point beyond the last pixel centre keeps
+          // that pixel's value rather than extrapolating past the edge of the data.
+          return { i0, j0, tx: Math.min(1, Math.max(0, px - i0)), ty: Math.min(1, Math.max(0, py - j0)), clampI, clampJ };
+        });
+        return { res, origin, ts, need, at, clampI, clampJ };
+      };
+      let z = zs, p = plan(z);
+      while (z > 0 && p.need.size > cfg.maxTiles) { z--; p = plan(z); }
+      if (p.need.size > cfg.maxTiles) return null;
+
+      const keys = Array.from(p.need.keys());
+      return Promise.all(keys.map((k) => {
+        const t = p.need.get(k);
+        return loadDataTile(src.getTile(z, t[0], t[1], 1, proj)).then((d) => [k, d]);
+      })).then((pairs) => {
+        const tiles = new Map(pairs);
+        const value = (i, j) => {
+          const tx = Math.floor(p.clampI(i) / p.ts[0]), ty = Math.floor(p.clampJ(j) / p.ts[1]);
+          i = p.clampI(i); j = p.clampJ(j);
+          const d = tiles.get(tx + '/' + ty);
+          if (!d) return null;
+          const col = i - tx * p.ts[0], row = j - ty * p.ts[1];
+          const v = d[(row * p.ts[0] + col) * bands + band];
+          return (v == null || !isFinite(v)) ? null : v;
+        };
+        return p.at.map((n) => {
+          const a = value(n.i0, n.j0), b = value(n.i0 + 1, n.j0);
+          const c = value(n.i0, n.j0 + 1), e = value(n.i0 + 1, n.j0 + 1);
+          if (a == null || b == null || c == null || e == null) return null;
+          const north = a + (b - a) * n.tx, south = c + (e - c) * n.tx;
+          return north + (south - north) * n.ty;
+        });
+      });
+      });
+    };
+  }
+
+  /**
+   * WMS GetFeatureInfo sampler: one request per point, for a coverage served as a rendered
+   * greyscale that cannot be decoded from its pixels.
+   *
+   * **It is slow**, unavoidably: a thousand-point track is a thousand round trips, where a
+   * tile source needs a handful. Worth it only when nothing else can reach the data - and
+   * `concurrency` is what keeps it bearable.
+   */
+  function featureInfoSampler(cfg) {
+    const fi = cfg.featureInfo;
+    const lanes = Math.max(1, cfg.concurrency || 6);
+    return (lonlats) => {
+      const out = new Array(lonlats.length);
+      let next = 0, broken = false;
+      const one = () => {
+        if (broken || next >= lonlats.length) return Promise.resolve();
+        const i = next++;
+        return fetch(featureInfoUrl(fi, lonlats[i]))
+          .then((r) => (r && r.ok) ? r.json() : null)
+          .then((body) => { out[i] = bandValue(body, fi.property); return one(); })
+          .catch(() => { broken = true; });
+      };
+      const running = [];
+      for (let i = 0; i < Math.min(lanes, lonlats.length); i++) running.push(one());
+      return Promise.all(running).then(() => broken ? null : out);
+    };
+  }
+
+  /** GetFeatureInfo URL for one point: a one-pixel image centred on it. */
+  function featureInfoUrl(fi, ll) {
+    const c = fromLonLat([ll[0], ll[1]]);
+    const d = fi.resolution || 1;                       // half-size of the box, in metres
+    const p = Object.assign({
+      SERVICE: 'WMS', REQUEST: 'GetFeatureInfo', VERSION: '1.3.0',
+      INFO_FORMAT: 'application/json', STYLES: '', FEATURE_COUNT: 1
+    }, fi.params || {});
+    const key = String(p.VERSION).indexOf('1.1') === 0 ? 'SRS' : 'CRS';
+    delete p.SRS; delete p.CRS;
+    p[key] = fi.projection || 'EPSG:3857';
+    p.LAYERS = fi.layers;
+    p.QUERY_LAYERS = fi.queryLayers || fi.layers;
+    p.WIDTH = 1; p.HEIGHT = 1; p.I = 0; p.J = 0; p.X = 0; p.Y = 0;   // I/J is 1.3.0, X/Y is 1.1.1
+    p.BBOX = [c[0] - d, c[1] - d, c[0] + d, c[1] + d].join(',');
+    return query(fi.url, p);
+  }
+
+  /**
+   * Band value in a GetFeatureInfo response.
+   *
+   * The band's property name is not standard - GeoServer calls it GRAY_INDEX for a
+   * single-band coverage, but a styled or renamed layer answers otherwise. Without an
+   * explicit `property` the first finite number wins, which is right whenever the coverage
+   * carries one band, and is why `property` exists for when it does not.
+   */
+  function bandValue(body, property) {
+    const f = body && body.features && body.features[0];
+    const props = f && f.properties;
+    if (!props) return null;
+    if (property) { const v = Number(props[property]); return isFinite(v) ? v : null; }
+    for (const k of Object.keys(props)) { const v = Number(props[k]); if (props[k] !== null && props[k] !== '' && isFinite(v)) return v; }
+    return null;
+  }
 
   /** Web Mercator pixel coordinates at zoom `z`, origin at the top-left corner of the world. */
   function worldPixel(lon, lat, z, tileSize) {
@@ -236,7 +558,9 @@ import * as d3 from 'd3';
     /** @param {Object} cfg `url`, `encoding`, `tileSize`, `concurrency`. */
     constructor(cfg) {
       this.cfg = cfg;
-      this.decode = DEM_DECODERS[cfg.encoding] || DEM_DECODERS.terrarium;
+      this.decode = (typeof cfg.encoding === 'function') ? cfg.encoding
+        : (DEM_DECODERS[cfg.encoding] || DEM_DECODERS.terrarium);
+      this.tileUrl = tileUrlFn(cfg);
       this.tiles = new Map();          // "z/x/y" -> RGBA pixels, or null if the tile was lost
     }
 
@@ -268,7 +592,8 @@ import * as d3 from 'd3';
       const data = this.tiles.get(r.key);
       if (!data) return null;
       const o = ((r.jj % ts) * ts + (r.ii % ts)) * 4;
-      return this.decode(data[o], data[o + 1], data[o + 2]);
+      const v = this.decode(data[o], data[o + 1], data[o + 2], data[o + 3]);
+      return (v == null || !isFinite(v)) ? null : v;
     }
 
     /**
@@ -302,7 +627,7 @@ import * as d3 from 'd3';
     /** Pixels of one tile, or null if it could not be read. */
     _fetch(key) {
       const parts = key.split('/');
-      const url = this.cfg.url.replace('{z}', parts[0]).replace('{x}', parts[1]).replace('{y}', parts[2]);
+      const url = this.tileUrl(+parts[0], +parts[1], +parts[2]);
       return new Promise((resolve) => {
         const img = new Image();
         // Without this attribute the canvas is tainted and getImageData throws: the tile
@@ -344,13 +669,44 @@ import * as d3 from 'd3';
     }
   }
 
-  /** The `dem` option (true | source name | object) → a full configuration, or null. */
+  /**
+   * The `dem` option (true | source name | sampling function | object) → a full
+   * configuration, or null.
+   *
+   * A `sample` function short-circuits the tile machinery entirely: the application
+   * answers with the elevations itself, from wherever it can reach them - a GeoServer
+   * WCS coverage, a GeoTIFF decoded with geotiff.js, a national elevation API. Only the
+   * transport is delegated; the control keeps the sequencing, the all-or-nothing rule,
+   * the spinner and the `demload` event, which is where the subtle parts live.
+   *
+   * That extension point rather than a WMS/WCS/GeoTIFF mode per protocol: reading a
+   * GeoTIFF means a full decoder, and this library has no runtime dependency to spend
+   * on one that most users would never load.
+   */
   function demConfig(opt) {
     if (!opt) return null;
+    if (typeof opt === 'function') return Object.assign({}, DEM_DEFAULTS, { sample: opt });
     const raw = (opt === true || typeof opt === 'string') ? { source: opt === true ? 'terrarium' : opt } : Object.assign({}, opt);
-    const preset = DEM_PRESETS[raw.source] || (raw.url ? {} : DEM_PRESETS.terrarium);
+    if (typeof raw.sample === 'function') return Object.assign({}, DEM_DEFAULTS, raw);
+    // A point-query source: no tile grid, no pixel decoding.
+    if (raw.featureInfo) {
+      const fiCfg = Object.assign({}, DEM_DEFAULTS, raw);
+      fiCfg.sample = featureInfoSampler(fiCfg);
+      return fiCfg;
+    }
+    // An ol/source/DataTile (GeoTIFF above all) carries values, not URLs: its own path.
+    if (raw.olSource && typeof raw.olSource.getTileUrlFunction !== 'function' &&
+        typeof raw.olSource.getTile === 'function') {
+      const dtCfg = Object.assign({}, DEM_DEFAULTS, raw);
+      dtCfg.sample = dataTileSampler(dtCfg);
+      return dtCfg;
+    }
+    // Tiles: an OpenLayers source or a WMS both stand in for the url template.
+    const hasTiles = raw.url || raw.wms || raw.olSource;
+    const preset = DEM_PRESETS[raw.source] || (hasTiles ? {} : DEM_PRESETS.terrarium);
     const cfg = Object.assign({}, DEM_DEFAULTS, preset, raw);
-    return cfg.url ? cfg : null;
+    if (cfg.api === 'ign') { cfg.sample = ignSampler(cfg); return cfg; }   // a point API
+    return (cfg.url || cfg.wms || cfg.olSource) ? cfg : null;
   }
 
   /**
@@ -399,6 +755,7 @@ import * as d3 from 'd3';
    * @property {boolean} [responsive=true] Adapt width/placement; mobile included.
    * @property {number} [mobileBreakpoint=640] Below this width: mobile mode (100% width, top/bottom only).
    * @property {boolean} [zoom=false] A/B buttons to crop map + profile to a sub-range.
+   * @property {boolean} [exportPng=false] Toolbar button exporting the whole panel as a PNG.
    * @property {boolean} [ignoreStops=true] When computing time, ignore stopped segments (moving time).
    * @property {number} [stopSpeed=0.5] Speed threshold (m/s) below which a segment counts as a stop.
    * @property {Array<'distance'|'elevation'|'slope'|'time'>} [tooltipItems=['distance','elevation']] Tooltip content (`'time'` = elapsed time at the cursor, if the track has time data).
@@ -407,7 +764,16 @@ import * as d3 from 'd3';
    * @property {?string} [titleLink=null] Feature property holding a URL → clickable title.
    * @property {number} [maxPoints=2000] Decimation for render/interaction (stats use full data).
    * @property {?import('ol/proj/Projection').default|string} [dataProjection=null] Projection of the feature coordinates.
-   * @property {?(boolean|string|Object)} [dem='terrarium'] Fill missing elevations from a terrain model. `'terrarium'` (default) or `true` = AWS Terrain Tiles (keyless); `null` disables it; or `{url,encoding:'terrarium'|'mapbox',zoom,maxZoom,maxTiles,tileSize,concurrency}`.
+   * @property {?(boolean|string|Function|Object)} [dem='terrarium'] Fill missing elevations
+   *   from a terrain model. Sources: `'terrarium'` (default) or `true` = AWS Terrain Tiles;
+   *   `'ign'` = IGN Géoplateforme RGE ALTI (France, keyless, `apiKey` optional);
+   *   `{url}` = XYZ template; `{wms:{url,layers,params}}` = WMS tiles;
+   *   `{olSource}` = any `ol/source/TileImage` (XYZ, TileWMS, …);
+   *   `{featureInfo:{url,layers,property}}` = WMS GetFeatureInfo, one request per point,
+   *   for a greyscale coverage that cannot be decoded from its pixels (slow);
+   *   a function or `{sample}` `(lonlats, ctx) => number[]|Promise<number[]>` to source them
+   *   yourself; `null` disables the whole thing.
+   *   Decoding: `encoding` is `'terrarium'`, `'mapbox'`, or a function `(r,g,b,a) => metres`.
    */
 
   /**
@@ -488,6 +854,8 @@ import * as d3 from 'd3';
       this._btnA = mkBtn('oep-a', ICON_A, o.labels.zoomStart, () => this._arm('A'));
       this._btnB = mkBtn('oep-b', ICON_B, o.labels.zoomEnd, () => this._arm('B'));
       this._btnAll = mkBtn('oep-all', ICON_ALL, o.labels.zoomAll, () => this._exitZoom());
+      // Last of the toolbar, so it sits to the right of the zoom buttons.
+      this._btnPng = mkBtn('oep-png', ICON_PNG, o.labels.exportPng, () => this.exportPNG());
       header.appendChild(this._toolbar);
 
       const btn = document.createElement('button');
@@ -672,7 +1040,7 @@ import * as d3 from 'd3';
       if (patch && (patch.theme || 'color' in patch)) this._applyTheme();
       if (patch && ('transparency' in patch || 'transparencyLevel' in patch)) this._applyTransparency();
       if (patch && 'collapsable' in patch) this._applyCollapsable();
-      if (patch && 'zoom' in patch) this._updateZoomButtons();
+      if (patch && ('zoom' in patch || 'exportPng' in patch)) this._updateZoomButtons();
       if (patch && typeof patch.width !== 'undefined' && typeof patch.width === 'number') this.options.width = patch.width;
       if (patch && 'dem' in patch) { this._demZ = null; this._demFor = null; }
       if (this._feature) { this._compute(); this._fillFromDem(this._feature); this._updateZoomButtons(); if (this._collapsed) this._renderTitle(); else this._render(); }
@@ -700,7 +1068,9 @@ import * as d3 from 'd3';
       const cfg = demConfig(this.options.dem);
       if (!cfg || !feature || this._demFor === feature) return;
       if (ElevationProfile.featureHasZ(feature)) return;              // the track already carries its Z
-      if (typeof Image === 'undefined' || typeof document === 'undefined') return;
+      // Canvas decoding needs a browser; a `sample` function does not, and must stay
+      // usable where there is no DOM.
+      if (!cfg.sample && (typeof Image === 'undefined' || typeof document === 'undefined')) return;
 
       const geom = feature.getGeometry && feature.getGeometry();
       if (!geom) return;
@@ -713,28 +1083,67 @@ import * as d3 from 'd3';
       // Sequence number: a track clicked while another is loading must win, otherwise the
       // slowest response would overwrite the profile on screen.
       const seq = ++this._demSeq;
+      this._demLoading = true;
+
+      // A misconfigured source must not take the profile down with it. _fillFromDem runs
+      // inside setFeature, so anything thrown here would reach the caller and leave no
+      // chart at all - where the whole point is that the fill is a supplement.
+      try {
+        this._startFill(cfg, seq, feature, lonlats, dataProj);
+      } catch (e) {
+        this._demDone(seq, feature, null, lonlats.length, null, 0);
+      }
+    }
+
+    /** @private */
+    _startFill(cfg, seq, feature, lonlats, dataProj) {
+      if (cfg.sample) {
+        // Wrapped in a promise chain so a function that throws synchronously fails the
+        // same way as one that rejects - a source that misbehaves must not leave the
+        // spinner turning forever.
+        Promise.resolve()
+          .then(() => cfg.sample(lonlats, { feature, projection: dataProj }))
+          .then((zs) => this._demDone(seq, feature, zs, lonlats.length, null, 0))
+          .catch(() => this._demDone(seq, feature, null, lonlats.length, null, 0));
+        return;
+      }
+
       const sampler = new DemSampler(cfg);
       const z = demZoomFor(sampler, lonlats, cfg);
-      this._demLoading = true;
       sampler.load(sampler.tilesFor(lonlats, z)).then((ok) => {
-        // A newer fill has taken over: it owns _demLoading and will clear it itself.
-        if (seq !== this._demSeq || this._feature !== feature) return;
         const zs = ok ? lonlats.map((ll) => sampler.sample(ll[0], ll[1], z)) : null;
-        const complete = !!zs && zs.every((v) => v != null && isFinite(v));
-        this._demLoading = false;
-        if (complete) { this._demZ = zs; this._demFor = feature; this._compute(); }
-        // Redrawn even on failure: the spinner has to give way to the flat profile.
-        this._updateZoomButtons();
-        if (!this._collapsed) this._render();
-        /**
-         * Fired once a terrain-model fill has completed (or failed).
-         * @event demload
-         * @property {boolean} ok Whether every point could be sampled.
-         * @property {number} zoom Tile zoom level used.
-         * @property {number} tiles Tiles fetched.
-         */
-        this.dispatchEvent({ type: 'demload', ok: complete, zoom: z, tiles: sampler.tiles.size });
-      });
+        this._demDone(seq, feature, zs, lonlats.length, z, sampler.tiles.size);
+      }).catch(() => this._demDone(seq, feature, null, lonlats.length, z, 0));
+    }
+
+    /**
+     * Outcome of a fill, whatever produced it: adopt the elevations, drop the spinner,
+     * redraw, announce.
+     *
+     * A result of the wrong length is refused outright rather than padded. Elevations one
+     * can no longer map to their points are worse than absent ones: they would land on the
+     * wrong places, and nothing downstream would notice.
+     *
+     * @fires demload
+     * @private
+     */
+    _demDone(seq, feature, zs, expected, zoom, tiles) {
+      // A newer fill has taken over: it owns _demLoading and will clear it itself.
+      if (seq !== this._demSeq || this._feature !== feature) return;
+      const usable = Array.isArray(zs) && zs.length === expected && zs.every((v) => v != null && isFinite(v));
+      this._demLoading = false;
+      if (usable) { this._demZ = zs; this._demFor = feature; this._compute(); }
+      // Redrawn even on failure: the spinner has to give way to the flat profile.
+      this._updateZoomButtons();
+      if (!this._collapsed) this._render();
+      /**
+       * Fired once a terrain-model fill has completed (or failed).
+       * @event demload
+       * @property {boolean} ok Whether every point could be sampled.
+       * @property {?number} zoom Tile zoom level used, `null` for a custom sampler.
+       * @property {number} tiles Tiles fetched, `0` for a custom sampler.
+       */
+      this.dispatchEvent({ type: 'demload', ok: usable, zoom, tiles });
     }
 
     // ---------- computation -------------------------------------------
@@ -1048,11 +1457,147 @@ import * as d3 from 'd3';
       this._adjustAttribution();
     }
 
+    // ---------- PNG export ---------------------------------------------
+    /**
+     * Properties frozen onto the exported clone.
+     *
+     * A serialized SVG carries no stylesheet: rules that live in the CSS file, and every
+     * `var(--oep-*)` they resolve, vanish the moment the markup leaves the document. The
+     * export would come out as black shapes on nothing. So the computed value of each
+     * painting property is written inline, node by node.
+     */
+    static get _EXPORT_PROPS() {
+      return ['fill', 'fill-opacity', 'stroke', 'stroke-width', 'stroke-dasharray',
+        'stroke-linecap', 'stroke-linejoin', 'opacity', 'font-family', 'font-size',
+        'font-weight', 'text-anchor', 'shape-rendering'];
+    }
+
+    /** Copies the computed painting styles of `src` onto `dst`, recursively. */
+    _freezeStyles(src, dst) {
+      const props = ElevationProfile._EXPORT_PROPS;
+      const cs = getComputedStyle(src);
+      let inline = '';
+      for (const p of props) { const v = cs.getPropertyValue(p); if (v) inline += `${p}:${v};`; }
+      dst.setAttribute('style', inline);
+      const a = src.children, b = dst.children;
+      for (let i = 0; i < a.length && i < b.length; i++) this._freezeStyles(a[i], b[i]);
+    }
+
+    /**
+     * The whole panel as an SVG string: background, title, stats, legend, chart.
+     *
+     * Rebuilt rather than screenshotted. The header is HTML and the chart is SVG, and the
+     * only way to put HTML in an SVG is a `foreignObject`, which browsers refuse to
+     * rasterise consistently. Redrawing the two text lines as `<text>` is a handful of
+     * lines and works everywhere.
+     *
+     * The current-position indicator is dropped: it marks where the pointer happens to be,
+     * which means nothing once the image is saved.
+     */
+    _exportSvg() {
+      const chart = this._body.querySelector('svg');
+      if (!chart) return null;
+      const cs = getComputedStyle(this.element);
+      const bg = cs.getPropertyValue('--oep-bg').trim() || '#fff';
+      const fg = cs.getPropertyValue('--oep-text').trim() || '#222';
+      const font = cs.fontFamily || 'system-ui, sans-serif';
+      const W = +chart.getAttribute('width'), H = +chart.getAttribute('height');
+      const pad = 8, titleH = 20, statsH = this._statsEl.textContent ? 15 : 0;
+      const legend = (this._legendEl.style.display !== 'none') ? this._legendEl : null;
+      const legH = legend ? 18 : 0;
+      const top = pad + titleH + statsH + legH;
+
+      const clone = chart.cloneNode(true);
+      // The pointer indicator and the hit-test overlay have no place in a saved image.
+      clone.querySelectorAll('.oep-focus, .oep-overlay').forEach((n) => n.remove());
+      this._freezeStyles(chart, clone);
+      // width/height are kept: a nested <svg> without them fills the parent viewport, so
+      // the chart would be stretched over the header's height as well.
+
+      const esc2 = (t) => esc(String(t));
+      const parts = [];
+      parts.push(`<rect width="${W + 2 * pad}" height="${H + top + pad}" fill="${esc2(bg)}"/>`);
+      parts.push(`<text x="${pad}" y="${pad + 13}" style="font-family:${esc2(font)};font-size:13px;font-weight:600;fill:${esc2(fg)}">${esc2(this._titleEl.textContent)}</text>`);
+      if (statsH) parts.push(`<text x="${pad}" y="${pad + titleH + 10}" style="font-family:${esc2(font)};font-size:11px;fill:${esc2(fg)};opacity:.85">${esc2(this._statsEl.textContent)}</text>`);
+      if (legend) {
+        let x = pad;
+        const y = pad + titleH + statsH + 12;
+        for (const item of legend.querySelectorAll('.oep-leg-it')) {
+          const sw = item.querySelector('.oep-sw');
+          const color = sw ? getComputedStyle(sw).backgroundColor : 'none';
+          const label = item.textContent.trim();
+          parts.push(`<rect x="${x}" y="${y - 8}" width="10" height="10" fill="${esc2(color)}"/>`);
+          parts.push(`<text x="${x + 14}" y="${y}" style="font-family:${esc2(font)};font-size:10px;fill:${esc2(fg)}">${esc2(label)}</text>`);
+          x += 14 + label.length * 5.6 + 10;
+        }
+      }
+      parts.push(`<g transform="translate(${pad},${top})">${new XMLSerializer().serializeToString(clone)}</g>`);
+      return {
+        width: W + 2 * pad, height: H + top + pad,
+        svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${W + 2 * pad}" height="${H + top + pad}" ` +
+             `viewBox="0 0 ${W + 2 * pad} ${H + top + pad}">${parts.join('')}</svg>`
+      };
+    }
+
+    /**
+     * Export the whole panel - title, stats, legend and chart - as a PNG.
+     *
+     * Resolves with the Blob. Unless `download` is false, it also saves the file, which is
+     * what the toolbar button does.
+     *
+     * @param {{scale?:number, filename?:string, download?:boolean}} [opts]
+     *   `scale` defaults to the device pixel ratio, so the image is not soft on a retina
+     *   screen. `filename` defaults to the track title.
+     * @returns {Promise<Blob>}
+     */
+    exportPNG(opts) {
+      const o = opts || {};
+      const built = this._exportSvg();
+      if (!built) return Promise.reject(new Error('ol-elevation-profile: nothing to export'));
+      const scale = o.scale || (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+          try {
+            const cv = document.createElement('canvas');
+            cv.width = Math.round(built.width * scale);
+            cv.height = Math.round(built.height * scale);
+            const ctx = cv.getContext('2d');
+            ctx.scale(scale, scale);
+            ctx.drawImage(img, 0, 0);
+            cv.toBlob((blob) => {
+              if (!blob) { reject(new Error('ol-elevation-profile: PNG encoding failed')); return; }
+              if (o.download !== false) this._save(blob, o.filename);
+              resolve(blob);
+            }, 'image/png');
+          } catch (e) { reject(e); }
+        };
+        img.onerror = () => reject(new Error('ol-elevation-profile: SVG could not be rasterised'));
+        // Encoded as a data URL rather than a blob: URL - a blob: source taints the canvas
+        // in some browsers, and toBlob would then throw a security error.
+        img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(built.svg);
+      });
+    }
+
+    /** @private */
+    _save(blob, filename) {
+      const name = filename || `${(this._titleEl.textContent || 'profile').replace(/[\\/:*?"<>|]+/g, '-').trim()}.png`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
     // ---------- zoom A/B ----------------------------------------------
     _arm(which) { this._armed = (this._armed === which) ? null : which; this._updateZoomButtons(); if (this._focus) this._render(); }
     _updateZoomButtons() {
-      const show = !!this.options.zoom && !!this._feature;
-      this._toolbar.style.display = show ? '' : 'none';
+      const o = this.options, has = !!this._feature;
+      const show = !!o.zoom && has;
+      const png = !!o.exportPng && has;
+      // The toolbar carries both: it stays visible as long as either has something to show.
+      this._toolbar.style.display = (show || png) ? '' : 'none';
+      this._btnPng.style.display = png ? '' : 'none';
       const crop = this._cropMode;
       this._btnA.style.display = show && !crop ? '' : 'none';
       this._btnB.style.display = show && !crop ? '' : 'none';

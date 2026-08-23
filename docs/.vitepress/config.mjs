@@ -28,7 +28,7 @@ export default defineConfig({
           { text: 'Guide', items: [
             { text: 'Getting started', link: '/guide/getting-started' },
             { text: 'Options', link: '/guide/options' },
-            { text: 'Slope, smoothing, terrain & attributions', link: '/guide/features' }
+            { text: 'Slope, terrain, export & attributions', link: '/guide/features' }
           ]},
           { text: 'Examples', link: '/examples' }
         ]
@@ -38,16 +38,16 @@ export default defineConfig({
       label: 'Français', lang: 'fr', link: '/fr/',
       themeConfig: {
         nav: [
-          { text: 'Guide', link: '/fr/guide/demarrage' },
+          { text: 'Guide', link: '/fr/guide/getting-started' },
           { text: 'Options', link: '/fr/guide/options' },
           { text: 'Exemples', link: '/fr/exemples' },
           { text: 'Démo', link: DEMO }
         ],
         sidebar: [
           { text: 'Guide', items: [
-            { text: 'Démarrage', link: '/fr/guide/demarrage' },
+            { text: 'Démarrage', link: '/fr/guide/getting-started' },
             { text: 'Options', link: '/fr/guide/options' },
-            { text: 'Pente, lissage, terrain & attributions', link: '/fr/guide/fonctions' }
+            { text: 'Pente, terrain, export & attributions', link: '/fr/guide/fonctions' }
           ]},
           { text: 'Exemples', link: '/fr/exemples' }
         ]

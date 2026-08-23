@@ -88,7 +88,25 @@ A track with **no Z** — drawn by hand, traced over a basemap, exported by a to
 
 Elevation is interpolated bilinearly between the four surrounding pixels — reading the containing pixel would make the profile advance in stairs, and every stair counts as a climb then a descent in the D+. A track is filled **entirely or not at all**: a profile missing a few points dives to sea level and its D+ becomes absurd. Tracks that already carry their own Z are untouched.
 
-Accuracy is roughly 30–90 m depending on the region (mean 16 m from IGN's 1 m reference on steep alpine terrain). Any XYZ tile set in `terrarium` or `mapbox` encoding can be used instead. See the [guide](https://lc-4918.github.io/ol-elevation-profile/guide/features#terrain-model).
+Accuracy is roughly 30–90 m depending on the region (mean 16 m from IGN's 1 m reference on steep alpine terrain). Any of these can be used instead:
+
+| `dem` | Source |
+|---|---|
+| `'terrarium'` (default) | AWS Terrain Tiles, keyless, worldwide |
+| `'ign'` | IGN Géoplateforme RGE ALTI, France, metre-accurate, keyless |
+| `{ url: '.../{z}/{x}/{y}.png' }` | any XYZ tile set, `terrarium` or `mapbox` encoding, or your own decoder |
+| `{ wms: { url, layers } }` | WMS tiles, one `GetMap` per tile |
+| `{ olSource }` | any `ol/source/TileImage`, or **`ol/source/GeoTIFF`** for a COG or a WCS `GetCoverage` |
+| `{ featureInfo: { url, layers } }` | GeoServer greyscale coverage, through WMS `GetFeatureInfo` |
+| a function | you fetch the elevations yourself, from any API |
+
+Every source but `featureInfo` is sampled with **bilinear interpolation** between the four surrounding pixels. See the [guide](https://lc-4918.github.io/ol-elevation-profile/guide/features#terrain-model).
+
+### PNG export
+
+`exportPng: true` adds a button to the toolbar, to the right of the zoom buttons, saving the **whole panel** as an image: title, stats line, slope legend and the complete chart with both axes. `profile.exportPNG()` does the same from code and resolves with the `Blob`; `{ download: false }` returns it without saving, `scale` defaults to the device pixel ratio.
+
+The position indicator is left out: it marks where the pointer happens to be, which means nothing once the image is saved. The panel is rebuilt as an SVG rather than screenshotted, with every painting property frozen inline, since a serialized SVG carries no stylesheet.
 
 ### Attributions
 
