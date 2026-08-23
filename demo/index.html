@@ -19,7 +19,7 @@
     #map { position: absolute; inset: 0; }
     .ol-zoom { top: .6em; left: .6em; }
 
-    /* bannière d'alerte altimétrie */
+    /* Elevation alert */
     #alert {
       position: absolute; top: 0; left: 0; right: 0; z-index: 30; display: none;
       background: rgba(255, 214, 0, 0.85); color: #3a2e00; border-bottom: 1px solid rgba(0,0,0,.15);
@@ -75,20 +75,20 @@
 
   <header>
     <h1>ol-<b>elevation</b>-profile</h1>
-    <p>Cliquez un tracé · survolez carte/profil · clic dans le vide pour masquer.</p>
+    <p>Click a track · hover the map or the chart · click empty space to hide.</p>
   </header>
 
     <button id="gear" title="Menu réglages" aria-label="Menu réglages">
     <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
   </button>
   <div id="panel">
-    <h2>Tracé</h2>
+    <h2>Track</h2>
     <div class="seg" id="tracks"></div>
-    <div class="chk"><label>Importer un fichier (GeoJSON / GPX / KML)
+    <div class="chk"><label>Import a file (GeoJSON / GPX / KML)
       <input type="file" id="importFile" accept=".geojson,.json,.gpx,.kml,.xml" style="display:block;margin-top:4px">
     </label></div>
 
-    <h2>Placement</h2>
+    <h2>Layout</h2>
     <div class="row"><label>position</label>
       <select id="position">
         <option>bottom</option><option>top</option><option>left</option><option>right</option>
@@ -96,11 +96,11 @@
       </select></div>
     <div class="row"><label>width</label>
       <input type="range" id="width" min="280" max="900" value="520"><span class="val" id="width_v">520</span></div>
-    <div class="seg"><button class="mini" id="widthAuto">width = carte (auto)</button></div>
+    <div class="seg"><button class="mini" id="widthAuto">width = map (auto)</button></div>
     <div class="row"><label>height</label>
       <input type="range" id="height" min="100" max="300" value="180"><span class="val" id="height_v">180</span></div>
 
-    <h2>Apparence</h2>
+    <h2>Appearance</h2>
     <div class="row"><label>theme</label>
       <select id="theme">
         <option>steelblue</option><option>lime</option><option>purple</option>
@@ -108,9 +108,9 @@
       </select></div>
     <div class="row"><label>color</label>
       <span><input type="color" id="color" value="#c4541a">
-        <button class="mini" id="colorTrace">trace</button>
-        <button class="mini" id="colorReset">thème</button></span></div>
-    <div class="row"><label>opacité fond</label>
+        <button class="mini" id="colorTrace">track</button>
+        <button class="mini" id="colorReset">theme</button></span></div>
+    <div class="row"><label>background opacity</label>
       <input type="range" id="opacity" min="0" max="100" value="100"><span class="val" id="opacity_v">100%</span></div>
     <div class="row"><label>xTicks</label>
       <input type="range" id="xTicks" min="2" max="14" value="6"><span class="val" id="xTicks_v">auto</span></div>
@@ -122,38 +122,39 @@
       <button data-flag="zoom">zoom A↔B</button>
     </div>
 
-    <h2>Profil</h2>
-    <div class="row"><label>lissage (m)</label>
+    <h2>Profile</h2>
+    <div class="row"><label>smoothing (m)</label>
       <input type="range" id="smoothing" min="0" max="300" step="10" value="0"><span class="val" id="smoothing_v">off</span></div>
+    <div class="chk"><label><input type="checkbox" id="dem" checked> fill elevation from a DEM (AWS tiles, no key)</label></div>
 
-    <h2>Pente (slope)</h2>
-    <div class="seg"><button data-flag="slope">activer slope</button></div>
-    <div class="row"><label>taille classe</label>
+    <h2>Slope</h2>
+    <div class="seg"><button data-flag="slope">enable slope</button></div>
+    <div class="row"><label>class size</label>
       <input type="range" id="slopeClassSize" min="1" max="5" step="0.5" value="2.5"><span class="val" id="slopeClassSize_v">2.5%</span></div>
 
-    <h2>Unités &amp; sélection</h2>
+    <h2>Units &amp; selection</h2>
     <div class="row"><label>units</label>
       <select id="units"><option value="meters">meters</option><option value="imperial">imperial</option></select></div>
     <div class="row"><label>show</label>
       <select id="show"><option>click</option><option>mouseover</option></select></div>
 
-    <h2>Infobulle</h2>
+    <h2>Tooltip</h2>
     <div class="chk" id="tooltipItems">
       <label><input type="checkbox" value="distance" checked> distance</label>
-      <label><input type="checkbox" value="elevation" checked> altitude</label>
-      <label><input type="checkbox" value="slope"> pente</label>
-      <label><input type="checkbox" value="time"> temps écoulé</label>
+      <label><input type="checkbox" value="elevation" checked> elevation</label>
+      <label><input type="checkbox" value="slope"> slope</label>
+      <label><input type="checkbox" value="time"> elapsed time</label>
     </div>
 
-    <h2>Entête</h2>
+    <h2>Header</h2>
     <div class="chk" id="headerItems">
       <label><input type="checkbox" value="distance" checked> distance</label>
       <label><input type="checkbox" value="ascent" checked> D+</label>
       <label><input type="checkbox" value="descent" checked> D-</label>
       <label><input type="checkbox" value="minmax" checked> min–max</label>
-      <label><input type="checkbox" value="duration"> durée totale</label>
+      <label><input type="checkbox" value="duration"> total duration</label>
     </div>
-    <div class="chk"><label><input type="checkbox" id="titleLink"> lien sur le titre (propriété « link »)</label></div>
+    <div class="chk"><label><input type="checkbox" id="titleLink"> link on the title (&laquo;&nbsp;link&nbsp;&raquo; property)</label></div>
   </div>
 
   <script>
@@ -187,7 +188,7 @@
       { id: 'gorgesAveyron', label: 'Gorges Aveyron' },
       { id: 'dunRevel',      label: 'Dunkerque–Revel' },
       { id: 'girAya',        label: 'Girona–Ayamonte' },
-      { id: 'noZ_demo',      label: 'Sans altimétrie' }
+      { id: 'noZ_demo',      label: 'No elevation' }
     ];
     const getGeo = (id) => (window.TRACK_DATA && window.TRACK_DATA[id])
       ? Promise.resolve(window.TRACK_DATA[id])
@@ -197,7 +198,9 @@
       dataProjection: 'EPSG:4326', featureProjection: map.getView().getProjection()
     });
 
+    let currentLabel = null;
     const loadTrack = (id) => getGeo(id).then((gj) => {
+      const t = TRACKS.find((x) => x.id === id); currentLabel = t ? t.label : null;
       vectorSource.clear();
       const feats = readFeats(gj);
       vectorSource.addFeatures(feats);
@@ -205,7 +208,7 @@
       map.getView().fit(feats[0].getGeometry().getExtent(), { padding: [70, 60, 230, 280], duration: 400 });
     });
 
-    // --- alerte partagée : altimétrie (Z) et temps manquants ---
+    // --- Shared alert : elevation (Z) and missing time ---
     let infoCache = [], importedInfo = null;
     const phrase = (labels, lack) => {
       const pl = labels.length > 1;
@@ -216,19 +219,26 @@
       const hd = document.querySelector('#headerItems input[value=duration]');
       return (tt && tt.checked) || (hd && hd.checked);
     };
+    const demActive = () => document.getElementById('dem').checked;
     const updateAlert = () => {
       const all = infoCache.concat(importedInfo ? [importedInfo] : []);
-      const noZ = all.filter((x) => !x.hasZ).map((x) => x.label);
+      // Avec le MNT actif, l'absence de Z dans le fichier n'est plus un manque : elle est
+      // comblée. On n'annonce donc que les tracés dont le remplissage a ÉCHOUÉ (demFailed),
+      // et non tous ceux qui n'ont pas de Z d'origine — un tracé pas encore affiché n'a
+      // même pas été tenté.
+      const noZ = all.filter((x) => !x.hasZ && !demActive()).map((x) => x.label);
+      const failed = demActive() ? all.filter((x) => x.demFailed).map((x) => x.label) : [];
       const noT = timeActive() ? all.filter((x) => !x.hasTime).map((x) => x.label) : [];
       const parts = [];
       if (noZ.length) parts.push(phrase(noZ, "d'altimétrie"));
+      if (failed.length) parts.push(phrase(failed, "d'altimétrie, et le modèle de terrain n'a pas pu la fournir"));
       if (noT.length) parts.push(phrase(noT, "de temps"));
       const box = document.getElementById('alert'), msg = document.getElementById('alert-msg');
       if (parts.length) { msg.innerHTML = parts.join('<br>'); box.style.display = 'block'; }
       else box.style.display = 'none';
     };
 
-    // --- import de fichiers : GeoJSON / GPX / KML (la librairie ne voit que des Feature OL) ---
+    // --- File imports : GeoJSON / GPX / KML (the library only use Ol.Feature) ---
     const lineCount = (ft) => { const g = ft.getGeometry(); const t = g && g.getType();
       if (t === 'LineString') return g.getCoordinates().length;
       if (t === 'MultiLineString') return g.getCoordinates().reduce((n, seg) => n + seg.length, 0);
@@ -266,14 +276,14 @@
       reader.readAsText(file);
     });
 
-    // --- scan des tracés : Z + temps, puis alerte ---
+    // --- Track scanning : Z + times, then alert ---
     Promise.all(TRACKS.map((t) => getGeo(t.id).then((gj) => {
       const f = readFeats(gj)[0];
       return { label: t.label, hasZ: Profile.featureHasZ(f), hasTime: Profile.featureHasTime(f) };
     }).catch(() => null))).then((res) => { infoCache = res.filter(Boolean); updateAlert(); });
     document.getElementById('alert-x').onclick = () => { document.getElementById('alert').style.display = 'none'; };
 
-    // --- sélecteur de tracé ---
+    // --- Track selector ---
     const tracksEl = document.getElementById('tracks');
     TRACKS.forEach((t, i) => {
       const b = document.createElement('button');
@@ -284,7 +294,7 @@
     });
     loadTrack(TRACKS[0].id);
 
-    // --- contrôles ---
+    // --- Controls ---
     const bindSelect = (id, key) => { document.getElementById(id).onchange = function () { profile.setOptions({ [key]: this.value }); }; };
     bindSelect('theme', 'theme'); bindSelect('position', 'position'); bindSelect('units', 'units'); bindSelect('show', 'show');
 
@@ -297,7 +307,20 @@
     bindRange('slopeClassSize', 'slopeClassSize', (v) => `${v}%`);
     bindRange('smoothing', 'smoothing', (v) => v === 0 ? 'off' : `${v} m`);
 
-    // largeur : borne le slider à la largeur de la carte + bouton "auto" (= largeur carte)
+    // DEM: only applies to tracks without elevation. The alert follows the outcome -
+    // filled means nothing is missing any more, failed is the only case worth reporting.
+    document.getElementById('dem').onchange = function () {
+      profile.setOptions({ dem: this.checked || null });
+      updateAlert();                       // toggling it changes what counts as missing
+    };
+    profile.on('demload', (e) => {
+      const cur = infoCache.find((x) => x.label === currentLabel) || importedInfo;
+      if (!cur) return;
+      if (e.ok) { cur.hasZ = true; cur.demFailed = false; } else { cur.demFailed = true; }
+      updateAlert();
+    });
+
+    // Width: limit slider at map width + "auto" button (= map width)
     const widthEl = document.getElementById('width'), widthV = document.getElementById('width_v');
     const syncWidthMax = () => {
       const mw = Math.round(map.getTargetElement().clientWidth);
@@ -335,7 +358,7 @@
     bindChecks('headerItems', 'headerItems');
     document.getElementById('titleLink').onchange = function () { profile.setOptions({ titleLink: this.checked ? 'link' : null }); };
 
-    // --- panneau réglages (masquable, replié par défaut sur mobile) ---
+    // --- Settings panel (hideable, folded by default on mobile devices) ---
     const panel = document.getElementById('panel');
     if (isMobile()) panel.classList.add('hidden');
     document.getElementById('gear').onclick = () => panel.classList.toggle('hidden');

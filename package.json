@@ -1,7 +1,7 @@
 {
   "name": "ol-elevation-profile",
   "version": "0.6.0",
-  "description": "Synchronized elevation profile control for OpenLayers, rendered with d3. Reads elevation directly from 3D GPX/GeoJSON geometries.",
+  "description": "Synchronized elevation profile control for OpenLayers, rendered with d3. Reads elevation from 3D GPX/GeoJSON geometries, and fills it from keyless terrain tiles when they have none.",
   "type": "module",
   "main": "dist/ol-elevation-profile.js",
   "module": "dist/ol-elevation-profile.esm.js",
@@ -33,7 +33,7 @@
   "scripts": {
     "build": "rollup -c && cp src/ol-elevation-profile.css dist/ol-elevation-profile.css",
     "prepublishOnly": "npm run build",
-    "test": "node test/smoke.js",
+    "test": "node test/smoke.cjs",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs"

@@ -26,6 +26,8 @@ Toutes les options se passent au constructeur et la plupart se modifient à l'ex
 
 **`maxPoints`** — plafonne le nombre de points dessinés et utilisés pour l'interaction (la géométrie est décimée au-delà). Les statistiques utilisent toujours les données complètes. `0` désactive la décimation. Défaut : `2000`.
 
+**`dem`** — complète les altitudes manquantes depuis un modèle numérique de terrain quand le feature n'a pas de Z. `'terrarium'` (défaut) ou `true` = [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/), sans clé ; **`null` le désactive** et garde le contrôle entièrement hors ligne ; ou un objet `{ url, encoding, zoom, maxZoom, maxTiles, tileSize, concurrency }`. Étant actif par défaut, un tracé sans Z déclenche de lui-même le chargement de tuiles — et apporte avec lui une obligation d'attribution. Voir [Modèle de terrain](/fr/guide/fonctions#modele-de-terrain). Défaut : `'terrarium'`.
+
 **`smoothing`** — lissage de l'altitude par moyenne glissante sur une distance en **mètres** (`0` = aucun). Étant métrique, il est indépendant de la densité de points GPS et adoucit le profil comme la pente. Défaut : `0`.
 
 ## Apparence
@@ -90,7 +92,7 @@ Toutes les options se passent au constructeur et la plupart se modifient à l'ex
 
 **`titleLink`** — une propriété contenant une URL ; si présente, le titre devient un lien cliquable. Défaut : `null`.
 
-**`labels`** — tous les textes affichés, surchargeables individuellement. Clés et défauts : `distance` `'Distance'`, `elevation` `'Altitude'`, `slope` `'Pente'`, `ascent` `'D+'`, `descent` `'D-'`, `empty` `'Cliquez un tracé'` (titre par défaut), `time` `'Temps'`, `duration` `'Durée'`, `durationUnits` `{ s:'sec', m:'min', h:'h', d:'j' }` (abréviations d'unités), `zoomStart` `'Définir le début (A)'`, `zoomEnd` `'Définir la fin (B)'`, `zoomAll` `'Tout voir'`.
+**`labels`** — tous les textes affichés, surchargeables individuellement. Clés et défauts : `distance` `'Distance'`, `elevation` `'Altitude'`, `slope` `'Pente'`, `ascent` `'D+'`, `descent` `'D-'`, `empty` `'Cliquez un tracé'` (titre par défaut), `time` `'Temps'`, `duration` `'Durée'`, `durationUnits` `{ s:'sec', m:'min', h:'h', d:'j' }` (abréviations d'unités), `zoomStart` `'Définir le début (A)'`, `zoomEnd` `'Définir la fin (B)'`, `zoomAll` `'Tout voir'`, `loading` `'Chargement du profil altimétrique'` (nom accessible du spinner de chargement du MNT).
 
 ```js
 // Exemple : libellés anglais
@@ -120,6 +122,7 @@ const profile = new OlElevationProfile({
   units: 'meters',                  // 'meters' | 'imperial'
   dataProjection: null,             // null = projection de la vue | 'EPSG:4326' | Projection
   maxPoints: 2000,                  // décimation rendu/interaction (0 = aucune)
+  dem: 'terrarium',                 // tuiles AWS | true | null = désactivé | { url, encoding, zoom, maxTiles }
   smoothing: 0,                     // fenêtre de lissage de l'altitude, en mètres
 
   // Apparence
@@ -161,7 +164,8 @@ const profile = new OlElevationProfile({
     ascent: 'D+', descent: 'D-', empty: 'Cliquez un tracé',
     time: 'Temps', duration: 'Durée',
     durationUnits: { s: 'sec', m: 'min', h: 'h', d: 'j' },
-    zoomStart: 'Définir le début (A)', zoomEnd: 'Définir la fin (B)', zoomAll: 'Tout voir'
+    zoomStart: 'Définir le début (A)', zoomEnd: 'Définir la fin (B)', zoomAll: 'Tout voir',
+    loading: 'Chargement du profil altimétrique'
   }
 })
 map.addControl(profile)
@@ -169,7 +173,7 @@ map.addControl(profile)
 
 ## Méthodes
 
-**`setFeature(feature)`** — affiche le profil pour un feature OpenLayers (LineString/MultiLineString, idéalement 3D). Une valeur fausse masque le contrôle. Renvoie `this`.
+**`setFeature(feature)`** — affiche le profil pour un feature OpenLayers, idéalement 3D : `LineString`, `MultiLineString`, ou un `Polygon` / `MultiPolygon`, parcouru le long de son **anneau extérieur** (les trous sont ignorés ; le profil revient à son point de départ, donc le D+ égale le D− — voir [Types de géométrie](/fr/guide/fonctions#types-de-geometrie)). Une valeur fausse masque le contrôle. Renvoie `this`.
 
 ```js
 const f = new ol.format.GeoJSON().readFeatures(geojson, {

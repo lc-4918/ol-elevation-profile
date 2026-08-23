@@ -7,6 +7,8 @@ export default defineConfig({
   title: 'ol-elevation-profile',
   description: 'Synchronized elevation profile control for OpenLayers, rendered with d3.',
   cleanUrls: true,
+  // Doc de maintenance, pas une page du site public.
+  srcExclude: ['WORKFLOW.md'],
   lastUpdated: true,
   themeConfig: {
     socialLinks: [{ icon: 'github', link: 'https://github.com/lc-4918/ol-elevation-profile' }],
@@ -26,7 +28,7 @@ export default defineConfig({
           { text: 'Guide', items: [
             { text: 'Getting started', link: '/guide/getting-started' },
             { text: 'Options', link: '/guide/options' },
-            { text: 'Slope, smoothing & attributions', link: '/guide/features' }
+            { text: 'Slope, smoothing, terrain & attributions', link: '/guide/features' }
           ]},
           { text: 'Examples', link: '/examples' }
         ]
@@ -45,7 +47,7 @@ export default defineConfig({
           { text: 'Guide', items: [
             { text: 'Démarrage', link: '/fr/guide/demarrage' },
             { text: 'Options', link: '/fr/guide/options' },
-            { text: 'Pente, lissage & attributions', link: '/fr/guide/fonctions' }
+            { text: 'Pente, lissage, terrain & attributions', link: '/fr/guide/fonctions' }
           ]},
           { text: 'Exemples', link: '/fr/exemples' }
         ]

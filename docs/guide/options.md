@@ -26,6 +26,8 @@ Every option can be passed to the constructor and most can be changed at runtime
 
 **`maxPoints`** — caps how many points are drawn and used for interaction (the geometry is decimated above this). Statistics always use the full data. `0` disables decimation. Default: `2000`.
 
+**`dem`** — fill missing elevations from a terrain model when the feature has no Z. `'terrarium'` (default) or `true` = [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/), keyless; **`null` disables it** and keeps the control entirely offline; or an object `{ url, encoding, zoom, maxZoom, maxTiles, tileSize, concurrency }`. Being on by default, a track without Z makes the control fetch tiles on its own — and brings an attribution obligation with it. See [Terrain model](/guide/features#terrain-model). Default: `'terrarium'`.
+
 **`smoothing`** — elevation smoothing as a sliding-window average over a distance in **metres** (`0` = none). Being metric, it is independent of GPS point density and softens both the profile and the slope. Default: `0`.
 
 ## Appearance
@@ -90,7 +92,7 @@ Every option can be passed to the constructor and most can be changed at runtime
 
 **`titleLink`** — a feature property holding a URL; when present, the title becomes a clickable link. Default: `null`.
 
-**`labels`** — all user-facing strings, overridable individually. Keys and defaults: `distance` `'Distance'`, `elevation` `'Altitude'`, `slope` `'Pente'`, `ascent` `'D+'`, `descent` `'D-'`, `empty` `'Cliquez un tracé'` (placeholder title), `time` `'Temps'`, `duration` `'Durée'`, `durationUnits` `{ s:'sec', m:'min', h:'h', d:'j' }` (time unit abbreviations), `zoomStart` `'Définir le début (A)'`, `zoomEnd` `'Définir la fin (B)'`, `zoomAll` `'Tout voir'`.
+**`labels`** — all user-facing strings, overridable individually. Keys and defaults: `distance` `'Distance'`, `elevation` `'Altitude'`, `slope` `'Pente'`, `ascent` `'D+'`, `descent` `'D-'`, `empty` `'Cliquez un tracé'` (placeholder title), `time` `'Temps'`, `duration` `'Durée'`, `durationUnits` `{ s:'sec', m:'min', h:'h', d:'j' }` (time unit abbreviations), `zoomStart` `'Définir le début (A)'`, `zoomEnd` `'Définir la fin (B)'`, `zoomAll` `'Tout voir'`, `loading` `'Chargement du profil altimétrique'` (accessible name of the terrain-model spinner).
 
 ```js
 // Example: English labels
@@ -120,6 +122,7 @@ const profile = new OlElevationProfile({
   units: 'meters',                  // 'meters' | 'imperial'
   dataProjection: null,             // null = view projection | 'EPSG:4326' | Projection
   maxPoints: 2000,                  // render/interaction decimation (0 = none)
+  dem: 'terrarium',                 // AWS tiles | true | null = off | { url, encoding, zoom, maxTiles }
   smoothing: 0,                     // elevation smoothing window, in metres
 
   // Appearance
@@ -161,7 +164,8 @@ const profile = new OlElevationProfile({
     ascent: 'D+', descent: 'D-', empty: 'Cliquez un tracé',
     time: 'Temps', duration: 'Durée',
     durationUnits: { s: 'sec', m: 'min', h: 'h', d: 'j' },
-    zoomStart: 'Définir le début (A)', zoomEnd: 'Définir la fin (B)', zoomAll: 'Tout voir'
+    zoomStart: 'Définir le début (A)', zoomEnd: 'Définir la fin (B)', zoomAll: 'Tout voir',
+    loading: 'Chargement du profil altimétrique'
   }
 })
 map.addControl(profile)
@@ -169,7 +173,7 @@ map.addControl(profile)
 
 ## Methods
 
-**`setFeature(feature)`** — show the profile for an OpenLayers feature (LineString/MultiLineString, ideally 3D). A falsy value hides the control. Returns `this`.
+**`setFeature(feature)`** — show the profile for an OpenLayers feature, ideally 3D: `LineString`, `MultiLineString`, or a `Polygon` / `MultiPolygon`, profiled along its **outer ring** (holes are ignored; the profile returns to its starting point, so D+ equals D− — see [Geometry types](/guide/features#geometry-types)). A falsy value hides the control. Returns `this`.
 
 ```js
 const f = new ol.format.GeoJSON().readFeatures(geojson, {

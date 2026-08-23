@@ -22,6 +22,7 @@ const profile = new OlElevationProfile({
   dataProjection: null,             // null = view projection | 'EPSG:4326' | Projection
   maxPoints: 2000,                  // render/interaction decimation (0 = none)
   smoothing: 0,                     // elevation smoothing window, in metres
+  dem: 'terrarium',                 // AWS tiles | true | null = off | { url, encoding, zoom, maxTiles }
 
   // Appearance
   theme: 'steelblue',               // steelblue | lime | purple | slate | graphite | amber | {area,line,axis,text,focus}
@@ -62,7 +63,8 @@ const profile = new OlElevationProfile({
     ascent: 'D+', descent: 'D-', empty: 'Cliquez un tracé',
     time: 'Temps', duration: 'Durée',
     durationUnits: { s: 'sec', m: 'min', h: 'h', d: 'j' },
-    zoomStart: 'Définir le début (A)', zoomEnd: 'Définir la fin (B)', zoomAll: 'Tout voir'
+    zoomStart: 'Définir le début (A)', zoomEnd: 'Définir la fin (B)', zoomAll: 'Tout voir',
+    loading: 'Chargement du profil altimétrique'
   }
 })
 map.addControl(profile)
@@ -104,4 +106,18 @@ const p = new OlElevationProfile({ zoom: true })
 if (!OlElevationProfile.featureHasZ(feature)) {
   // warn the user this track has no altimetry
 }
+```
+
+## Fill a track that has no elevation
+
+```js
+const profile = new OlElevationProfile();               // AWS Terrain Tiles by default, no API key
+
+// Optional: know whether the fill succeeded (it is all-or-nothing).
+profile.on('demload', (e) => console.log(e.ok, e.zoom, e.tiles));
+
+// Any XYZ tile set in terrarium or mapbox encoding works instead:
+new OlElevationProfile({
+  dem: { url: 'https://example.org/dem/{z}/{x}/{y}.png', encoding: 'mapbox', maxZoom: 13 }
+});
 ```

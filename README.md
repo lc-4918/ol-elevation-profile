@@ -9,7 +9,7 @@
 
 A synchronized, themeable **elevation profile control for [OpenLayers](https://openlayers.org/)**, rendered with [d3](https://d3js.org/).
 
-It reads elevation (**Z**) directly from a track's geometry (`[lon, lat, z]` GPX/GeoJSON), so **no elevation service is queried** — distance, ascent/descent and min/max are computed from the track itself. Clicking (or hovering) a track shows its profile; a marker stays synchronized on both the map and the chart, and a click on the empty map hides it. The control is fully responsive (full-width docked bar on phones), supports slope-class colouring, metric smoothing, an A↔B crop, six themes, transparency, and a track-colour mode.
+It reads elevation (**Z**) directly from a track's geometry (`[lon, lat, z]` GPX/GeoJSON) — distance, ascent/descent and min/max are computed from the track itself, with no service involved. A track that carries **no** Z is filled from keyless [terrain tiles](#terrain-model), which is on by default; `dem: null` turns it off. Clicking (or hovering) a track shows its profile; a marker stays synchronized on both the map and the chart, and a click on the empty map hides it. The control is fully responsive (full-width docked bar on phones), supports slope-class colouring, metric smoothing, an A↔B crop, six themes, transparency, and a track-colour mode.
 
 ## Screenshots
 
@@ -81,6 +81,14 @@ With `slope: true`, the profile is split into contiguous portions of the same sl
 ### Smoothing
 
 `smoothing` is a sliding-window average over **metres** of track (`0` = none, the default). Because the unit is metric, the result is independent of GPS point density; it softens both the profile and the slope.
+
+### Terrain model
+
+A track with **no Z** — drawn by hand, traced over a basemap, exported by a tool that drops the third dimension — would get no profile. The missing elevations are read from [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) instead, **by default**: PNG tiles carrying elevation in their R/G/B channels, **no API key, no quota, no rate limit**. A 10 000-point track costs a handful of tiles where a free elevation API would cost 100 requests. Pass `dem: null` to disable it and keep the control off the network.
+
+Elevation is interpolated bilinearly between the four surrounding pixels — reading the containing pixel would make the profile advance in stairs, and every stair counts as a climb then a descent in the D+. A track is filled **entirely or not at all**: a profile missing a few points dives to sea level and its D+ becomes absurd. Tracks that already carry their own Z are untouched.
+
+Accuracy is roughly 30–90 m depending on the region (mean 16 m from IGN's 1 m reference on steep alpine terrain). Any XYZ tile set in `terrarium` or `mapbox` encoding can be used instead. See the [guide](https://lc-4918.github.io/ol-elevation-profile/guide/features#terrain-model).
 
 ### Attributions
 

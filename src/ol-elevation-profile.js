@@ -1,9 +1,11 @@
 /**
  * Synchronized elevation profile control for OpenLayers, rendered with d3.
  *
- * Reads elevation (Z) directly from 3D line geometries (`[lon, lat, z]`),
- * so no external elevation service is queried. Clicking (or hovering) a track
- * shows its profile; a marker stays synchronized on both the map and the chart.
+ * Reads elevation (Z) directly from 3D line geometries (`[lon, lat, z]`). A track without
+ * Z is completed from a terrain model - keyless AWS Terrain Tiles by default, which means
+ * the control fetches tiles on its own; set `dem: null` to keep it entirely offline.
+ * Clicking (or hovering) a track shows its profile; a marker stays synchronized on both
+ * the map and the chart.
  *
  * Peer dependencies (provided by the host application, not bundled):
  *  - OpenLayers >= 6  (https://openlayers.org/)
@@ -34,25 +36,26 @@ import * as d3 from 'd3';
   const DEFAULTS = {
     immersion: 'docked',
     position: 'bottom',
-    width: 520,                   // nombre (px, plafonné à la largeur de la carte) ou 'auto'/'100%'/'full' = largeur de la carte
+    width: 520,                   // number (px, capped to the map width) or 'auto'/'100%'/'full' = map width
     height: 180,
     margins: { unit: 'px', top: 20, right: 24, bottom: 30, left: 48 },
     units: 'meters',
     dataProjection: null,
+    dem: 'terrarium',             // AWS tiles by default; null = off; or { url, encoding, zoom, maxTiles }
     maxPoints: 2000,
-    smoothing: 0,                 // lissage de l'altitude : fenêtre en MÈTRES (0 = aucun)
+    smoothing: 0,                 // elevation smoothing: window in METRES (0 = none)
     theme: 'steelblue',
-    color: null,                  // null=thème, 'auto'=couleur de la trace, ou couleur CSS
+    color: null,                  // null = theme, 'auto' = track colour, or a CSS colour
     trackLayer: null,
     transparency: false,          // false | true | nombre 0..1
     transparencyLevel: 0.45,
     grid: true,
     slope: false,
     slopeClassSize: 2.5,
-    slopeColors: null,            // null = dégradé bleu->rouge (HSL) ; sinon tableau interpolé
-    slopeSeparators: true,        // ligne verticale à chaque changement de classe
+    slopeColors: null,            // null = blue->red ramp (HSL); otherwise an interpolated array
+    slopeSeparators: true,        // vertical line at each class change
     slopeLegend: true,
-    maxClasses: 8,                // nombre maximal de classes de pente (couleurs + légende)
+    maxClasses: 8,                // maximum number of slope classes (colours + legend)
     xTicks: null,
     yTicks: null,
     show: 'click',
@@ -61,11 +64,11 @@ import * as d3 from 'd3';
     followMap: true,
     marker: true,
     hideOnMapClick: true,
-    responsive: true,             // adapte la largeur/placement, mobile inclus
-    mobileBreakpoint: 640,        // <= largeur écran -> mode mobile (100% largeur, top/bottom)
-    zoom: false,                  // boutons début/fin pour recadrer carte + profil sur A..B
-    ignoreStops: true,            // durée = temps en mouvement (ignore les arrêts)
-    stopSpeed: 0.5,               // seuil d'arrêt en m/s (~1,8 km/h)
+    responsive: true,             // adapts width/placement, mobile included
+    mobileBreakpoint: 640,        // <= screen width -> mobile mode (100% width, top/bottom)
+    zoom: false,                  // start/end buttons cropping map + profile to A..B
+    ignoreStops: true,            // duration = moving time (stops excluded)
+    stopSpeed: 0.5,               // stop threshold in m/s (~1.8 km/h)
     tooltipItems: ['distance', 'elevation'],
     headerItems: ['distance', 'ascent', 'descent', 'minmax'],
     titleProperty: 'name',
@@ -75,7 +78,8 @@ import * as d3 from 'd3';
       ascent: 'D+', descent: 'D-', empty: 'Cliquez un tracé',
       time: 'Temps', duration: 'Durée',
       durationUnits: { s: 'sec', m: 'min', h: 'h', d: 'j' },
-      zoomStart: 'Définir le début (A)', zoomEnd: 'Définir la fin (B)', zoomAll: 'Tout voir'
+      zoomStart: 'Définir le début (A)', zoomEnd: 'Définir la fin (B)', zoomAll: 'Tout voir',
+      loading: 'Chargement du profil altimétrique'
     }
   };
 
@@ -92,15 +96,44 @@ import * as d3 from 'd3';
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const isUrl = (v) => typeof v === 'string' && /^(https?:)?\/\/|^mailto:/i.test(v);
 
-  // Extrait un tableau plat de timestamps (ms epoch) aligné sur l'ordre plat des coordonnées,
-  // depuis properties.coordTimes (ISO ou nombre), coordinateProperties.times, ou la 4e dimension (M).
+  /**
+   * Coordinate segments to profile, whatever the geometry type: an array of point arrays.
+   *
+   * A polygon is profiled along its **outer ring only**; the holes are not part of the
+   * outline itself. The ring being closed, the profile returns to its starting point -
+   * that is the outline, faithfully, not a defect.
+   *
+   * One place for the five that used to test `getType()` themselves: they all wrapped
+   * `getCoordinates()` in one extra array unless it was a MultiLineString, which silently
+   * made a polygon iterate over its rings as if they were points.
+   */
+  function geomLines(geom) {
+    if (!geom || !geom.getCoordinates) return [];
+    const c = geom.getCoordinates();
+    switch (geom.getType()) {
+      case 'LineString':
+      case 'LinearRing': return [c];
+      case 'MultiLineString': return c;
+      case 'Polygon': return c.length ? [c[0]] : [];
+      case 'MultiPolygon': return c.map((poly) => poly[0]).filter(Boolean);
+      default: return [];
+    }
+  }
+
+  /** Whether a geometry can be profiled at all - the map-selection filter and nothing more. */
+  function isProfilable(geom) {
+    return !!geom && /^(Multi)?(LineString|Polygon)$|^LinearRing$/.test(geom.getType());
+  }
+
+  // Flat array of timestamps (epoch ms) aligned on the flat coordinate order, read from
+  // properties.coordTimes (ISO or number), coordinateProperties.times, or the 4th (M) dimension.
   function extractTimes(feature, lines) {
     const props = (feature && feature.getProperties) ? feature.getProperties() : {};
     let raw = props.coordTimes;
     if (raw == null && props.coordinateProperties) raw = props.coordinateProperties.times || props.coordinateProperties.coordTimes;
     let flat = null;
     if (Array.isArray(raw)) flat = Array.isArray(raw[0]) ? raw.reduce((a, b) => a.concat(b), []) : raw.slice();
-    if (!flat && lines) {                          // repli : 4e dimension M (layout XYZM)
+    if (!flat && lines) {                          // fallback: 4th M dimension (XYZM layout)
       const tmp = []; let any = false;
       for (const seg of lines) for (const c of seg) { const v = c.length > 3 ? c[3] : null; tmp.push(v); if (v != null && isFinite(v)) any = true; }
       flat = any ? tmp : null;
@@ -153,6 +186,186 @@ import * as d3 from 'd3';
   const ICON_B = '<svg viewBox="0 0 24 24"><path d="M17 5v14M13 12H5m0 0 3-3m-3 3 3 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   const ICON_ALL = '<svg viewBox="0 0 24 24"><path d="M4 12h16M4 12l4-4M4 12l4 4M20 12l-4-4M20 12l-4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
+  // ----- digital elevation model (DEM) -----------------------------------
+  /**
+   * Known terrain-tile sources.
+   *
+   * A PNG tile carries elevation in its R/G/B channels; it is read on a canvas rather
+   * than queried point by point from an API. That is what makes a 10 000-point track a
+   * handful of requests, with no key, no quota and no rate limit — where the free
+   * elevation APIs cap out at 100 or 200 points per call.
+   *
+   * Attribution is not automatic: the library does not own the map. It is up to the
+   * application to carry `attributions` in its own basemap source - and since the DEM is
+   * on by default, that obligation arrives without having been asked for. `dem: null`
+   * turns the whole thing off.
+   */
+  const DEM_PRESETS = {
+    terrarium: {
+      url: 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png',
+      encoding: 'terrarium',
+      maxZoom: 14,
+      attributions: 'Elevation: <a href="https://registry.opendata.aws/terrain-tiles/">Terrain Tiles</a> (AWS Open Data)'
+    }
+  };
+
+  const DEM_DEFAULTS = { source: 'terrarium', zoom: 'auto', maxZoom: 14, maxTiles: 32, concurrency: 6, tileSize: 256 };
+
+  /** RGB → metres decoders, one per encoding convention. */
+  const DEM_DECODERS = {
+    terrarium: (r, g, b) => (r * 256 + g + b / 256) - 32768,
+    mapbox: (r, g, b) => -10000 + (r * 65536 + g * 256 + b) * 0.1
+  };
+
+  /** Web Mercator pixel coordinates at zoom `z`, origin at the top-left corner of the world. */
+  function worldPixel(lon, lat, z, tileSize) {
+    const n = tileSize * Math.pow(2, z);
+    const s = Math.sin(lat * Math.PI / 180);
+    return [(lon + 180) / 360 * n, (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * n];
+  }
+
+  /**
+   * Reads elevations from a set of terrain tiles.
+   *
+   * Positions are held in **world pixels** rather than tile by tile: the four neighbours
+   * of a point can fall in two different tiles whenever it runs along an edge, which is
+   * the common case on a track. Converting to world pixels first, then resolving the
+   * tile, makes the edge case disappear instead of handling it.
+   */
+  class DemSampler {
+    /** @param {Object} cfg `url`, `encoding`, `tileSize`, `concurrency`. */
+    constructor(cfg) {
+      this.cfg = cfg;
+      this.decode = DEM_DECODERS[cfg.encoding] || DEM_DECODERS.terrarium;
+      this.tiles = new Map();          // "z/x/y" -> RGBA pixels, or null if the tile was lost
+    }
+
+    /**
+     * North-west neighbour of the point plus the interpolation fractions, in world pixels.
+     *
+     * The half-pixel subtracted is not a fudge: pixel centres fall on half-integers, and
+     * without that shift `floor()` would return the cell containing the point rather than
+     * its western neighbour, offsetting the whole profile by half a pixel.
+     */
+    _neighbours(lon, lat, z) {
+      const wp = worldPixel(lon, lat, z, this.cfg.tileSize);
+      const px = wp[0] - 0.5, py = wp[1] - 0.5;
+      const i0 = Math.floor(px), j0 = Math.floor(py);
+      return { i0, j0, tx: px - i0, ty: py - j0 };
+    }
+
+    /** Tile key of a world pixel; x wraps around the globe, y clamps at the poles. */
+    _key(i, j, z) {
+      const ts = this.cfg.tileSize, span = ts * Math.pow(2, z);
+      const jj = Math.min(span - 1, Math.max(0, j)), ii = ((i % span) + span) % span;
+      return { key: z + '/' + Math.floor(ii / ts) + '/' + Math.floor(jj / ts), ii, jj };
+    }
+
+    /** Elevation of one pixel, or null if its tile is missing. */
+    _at(i, j, z) {
+      const ts = this.cfg.tileSize;
+      const r = this._key(i, j, z);
+      const data = this.tiles.get(r.key);
+      if (!data) return null;
+      const o = ((r.jj % ts) * ts + (r.ii % ts)) * 4;
+      return this.decode(data[o], data[o + 1], data[o + 2]);
+    }
+
+    /**
+     * Elevation **bilinearly interpolated** between the four surrounding pixels; null as
+     * soon as a single one is missing.
+     *
+     * Bilinear rather than "the pixel containing the point": on a 30 or 90 m model, taking
+     * the pixel value makes the profile advance in stairs, and every stair counts as a
+     * climb then a descent in the ascent total. The interpolation invents no relief — it
+     * renders the same surface, without the steps of the sampling grid.
+     */
+    sample(lon, lat, z) {
+      const n = this._neighbours(lon, lat, z);
+      const a = this._at(n.i0, n.j0, z), b = this._at(n.i0 + 1, n.j0, z);
+      const c = this._at(n.i0, n.j0 + 1, z), d = this._at(n.i0 + 1, n.j0 + 1, z);
+      if (a == null || b == null || c == null || d == null) return null;
+      const north = a + (b - a) * n.tx, south = c + (d - c) * n.tx;
+      return north + (south - north) * n.ty;
+    }
+
+    /** Keys of the tiles needed by the four neighbours of each of the points. */
+    tilesFor(lonlats, z) {
+      const keys = new Set();
+      for (const ll of lonlats) {
+        const n = this._neighbours(ll[0], ll[1], z);
+        for (let di = 0; di < 2; di++) for (let dj = 0; dj < 2; dj++) keys.add(this._key(n.i0 + di, n.j0 + dj, z).key);
+      }
+      return keys;
+    }
+
+    /** Pixels of one tile, or null if it could not be read. */
+    _fetch(key) {
+      const parts = key.split('/');
+      const url = this.cfg.url.replace('{z}', parts[0]).replace('{x}', parts[1]).replace('{y}', parts[2]);
+      return new Promise((resolve) => {
+        const img = new Image();
+        // Without this attribute the canvas is tainted and getImageData throws: the tile
+        // would display, but stay unreadable. The intended sources answer with
+        // Access-Control-Allow-Origin: *.
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+          try {
+            const ts = this.cfg.tileSize;
+            const cv = document.createElement('canvas');
+            cv.width = ts; cv.height = ts;
+            const ctx = cv.getContext('2d', { willReadFrequently: true });
+            ctx.drawImage(img, 0, 0, ts, ts);
+            resolve(ctx.getImageData(0, 0, ts, ts).data);
+          } catch (e) { resolve(null); }
+        };
+        img.onerror = () => resolve(null);
+        img.src = url;
+      });
+    }
+
+    /**
+     * Loads the missing tiles, `concurrency` in flight. Resolves false if one is missing.
+     *
+     * Lost tiles are remembered as such: without that, a second pass over the same track
+     * would fire the same requests, doomed to fail again.
+     */
+    load(keys) {
+      const todo = Array.from(keys).filter((k) => !this.tiles.has(k));
+      let next = 0, ok = true;
+      const worker = () => {
+        if (next >= todo.length) return Promise.resolve();
+        const k = todo[next++];
+        return this._fetch(k).then((data) => { this.tiles.set(k, data); if (!data) ok = false; return worker(); });
+      };
+      const lanes = [];
+      for (let i = 0; i < Math.min(this.cfg.concurrency, todo.length); i++) lanes.push(worker());
+      return Promise.all(lanes).then(() => ok);
+    }
+  }
+
+  /** The `dem` option (true | source name | object) → a full configuration, or null. */
+  function demConfig(opt) {
+    if (!opt) return null;
+    const raw = (opt === true || typeof opt === 'string') ? { source: opt === true ? 'terrarium' : opt } : Object.assign({}, opt);
+    const preset = DEM_PRESETS[raw.source] || (raw.url ? {} : DEM_PRESETS.terrarium);
+    const cfg = Object.assign({}, DEM_DEFAULTS, preset, raw);
+    return cfg.url ? cfg : null;
+  }
+
+  /**
+   * Zoom at which to download the model: the finest one that fits within `maxTiles`.
+   *
+   * It is the tiling that widens as the track grows, not a model that degrades: a 10 km
+   * track is read at the finest step available, a 300 km one at a coarser step rather
+   * than in three hundred requests.
+   */
+  function demZoomFor(sampler, lonlats, cfg) {
+    if (typeof cfg.zoom === 'number') return cfg.zoom;
+    for (let z = cfg.maxZoom; z > 0; z--) if (sampler.tilesFor(lonlats, z).size <= cfg.maxTiles) return z;
+    return 1;
+  }
+
   // =======================================================================
   /**
    * @typedef {Object} ElevationProfileOptions
@@ -194,6 +407,7 @@ import * as d3 from 'd3';
    * @property {?string} [titleLink=null] Feature property holding a URL → clickable title.
    * @property {number} [maxPoints=2000] Decimation for render/interaction (stats use full data).
    * @property {?import('ol/proj/Projection').default|string} [dataProjection=null] Projection of the feature coordinates.
+   * @property {?(boolean|string|Object)} [dem='terrarium'] Fill missing elevations from a terrain model. `'terrarium'` (default) or `true` = AWS Terrain Tiles (keyless); `null` disables it; or `{url,encoding:'terrarium'|'mapbox',zoom,maxZoom,maxTiles,tileSize,concurrency}`.
    */
 
   /**
@@ -221,12 +435,13 @@ import * as d3 from 'd3';
       this._marker = null;
       this._collapsed = !!o.collapsed;
       this._cropMode = false; this._zoomA = null; this._zoomB = null; this._armed = null; this._fitRes = null;
+      this._demZ = null; this._demFor = null; this._demSeq = 0; this._demLoading = false;
       this._onResize = () => { if (this._feature && !this._collapsed) this._render(); };
       this._buildDom(element);
       element.style.display = 'none';
     }
 
-    // ---------- util statique ----------------------------------------
+    // ---------- static helpers ----------------------------------------
     /**
      * Whether a feature has any Z (elevation) coordinate.
      * @param {import('ol/Feature').default} feature
@@ -235,8 +450,7 @@ import * as d3 from 'd3';
     static featureHasZ(feature) {
       const g = feature && feature.getGeometry && feature.getGeometry();
       if (!g) return false;
-      const coords = g.getType() === 'MultiLineString' ? g.getCoordinates() : [g.getCoordinates()];
-      for (const seg of coords) for (const c of seg) if (c.length > 2 && isFinite(c[2])) return true;
+      for (const seg of geomLines(g)) for (const c of seg) if (c.length > 2 && isFinite(c[2])) return true;
       return false;
     }
 
@@ -248,8 +462,7 @@ import * as d3 from 'd3';
     static featureHasTime(feature) {
       const g = feature && feature.getGeometry && feature.getGeometry();
       if (!g) return false;
-      const lines = g.getType() === 'MultiLineString' ? g.getCoordinates() : [g.getCoordinates()];
-      return !!extractTimes(feature, lines);
+      return !!extractTimes(feature, geomLines(g));
     }
 
     // ---------- DOM ---------------------------------------------------
@@ -338,7 +551,7 @@ import * as d3 from 'd3';
       this._adjustAttribution();
     }
 
-    // ---------- responsive -------------------------------------------
+    // ---------- responsive --------------------------------------------
     _availWidth() {
       const map = this.getMap();
       const t = map && map.getTargetElement && map.getTargetElement();
@@ -354,7 +567,7 @@ import * as d3 from 'd3';
       return mobile;
     }
 
-    // remonte les attributions OL au-dessus du profil quand celui-ci occupe le coin bas-droite
+    // Lift the OL attribution above the profile when the profile takes the bottom-right corner
     _adjustAttribution() {
       const map = this.getMap();
       const target = map && map.getTargetElement && map.getTargetElement();
@@ -365,17 +578,17 @@ import * as d3 from 'd3';
       const mapR = target.getBoundingClientRect();
       const pR = this.element.getBoundingClientRect();
       if (!pR.height) return;
-      const bottomGap = mapR.bottom - pR.bottom;                     // bord bas de carte <-> bas du profil
+      const bottomGap = mapR.bottom - pR.bottom;                     // map bottom edge <-> profile bottom
       const rightGap = mapR.right - pR.right;
-      const atBottom = bottomGap < pR.height;                        // profil dans la bande basse
-      const reachesRight = rightGap < 24;                            // atteint le coin bas-droite (attributions)
+      const atBottom = bottomGap < pR.height;                        // profile sits in the bottom band
+      const reachesRight = rightGap < 24;                            // reaches the bottom-right corner (attributions)
       if (atBottom && reachesRight) {
         attr.style.right = `${Math.max(0, Math.round(rightGap))}px`;
-        attr.style.bottom = `${Math.round(pR.height + 2 * bottomGap)}px`;  // même écart au-dessus du profil
+        attr.style.bottom = `${Math.round(pR.height + 2 * bottomGap)}px`;  // same gap above the profile
       }
     }
 
-    // ---------- carte -------------------------------------------------
+    // ---------- map ---------------------------------------------------
     setMap(map) {
       const prev = this.getMap();
       super.setMap(map);
@@ -394,7 +607,7 @@ import * as d3 from 'd3';
       if (typeof window !== 'undefined') window.addEventListener('resize', this._onResize);
 
       const lineAt = (pixel) => map.forEachFeatureAtPixel(pixel, (f) => {
-        const g = f.getGeometry(); return (g && /LineString/.test(g.getType())) ? f : undefined;
+        const g = f.getGeometry(); return isProfilable(g) ? f : undefined;
       });
 
       this._mapKeys = [];
@@ -404,11 +617,11 @@ import * as d3 from 'd3';
       if (o.hideOnMapClick) this._mapKeys.push(map.on('click', (evt) => { if (!lineAt(evt.pixel) && this._feature) this.clear(); }));
       if (o.followMap) this._mapKeys.push(map.on('pointermove', (evt) => {
         if (!this._feature || this._collapsed) return;
-        const cp = this._feature.getGeometry().getClosestPoint(evt.coordinate);
+        const cp = this._closestOnProfile(evt.coordinate); if (!cp) return;
         const px = map.getPixelFromCoordinate(cp); if (!px) return;
         if (Math.hypot(px[0] - evt.pixel[0], px[1] - evt.pixel[1]) < 14) this._focusByCoord(cp); else this._clearFocus();
       }));
-      // sortie du zoom au dézoom de la carte
+      // leave the A/B crop when the map is zoomed out
       this._mapKeys.push(map.on('moveend', () => {
         if (this._cropMode && this._fitRes && map.getView().getResolution() > this._fitRes * 1.25) this._exitZoom();
       }));
@@ -417,7 +630,8 @@ import * as d3 from 'd3';
 
     // ---------- API ---------------------------------------------------
     /**
-     * Show the profile for the given feature (LineString/MultiLineString, ideally 3D).
+     * Show the profile for the given feature (LineString, MultiLineString, or a Polygon /
+     * MultiPolygon profiled along its outer ring), ideally 3D.
      * Passing a falsy value hides the control.
      * @param {?import('ol/Feature').default} feature
      * @returns {this}
@@ -425,17 +639,21 @@ import * as d3 from 'd3';
     setFeature(feature) {
       this._feature = feature || null;
       this._cropMode = false; this._zoomA = null; this._zoomB = null; this._armed = null;
-      if (!feature) { this._fullSamples = this._samples = null; this._clear(); return this; }
+      if (!feature) { this._fullSamples = this._samples = null; this._demZ = this._demFor = null; this._clear(); return this; }
       this.element.style.display = '';
       this._compute();
+      // Before the render, not after: it is _fillFromDem that knows whether a fill is
+      // starting, and the render needs that to draw the spinner instead of a flat profile.
+      this._fillFromDem(feature);
       this._updateZoomButtons();
-      if (!this._collapsed) this._render();
+      if (this._collapsed) this._renderTitle(); else this._render();
       return this;
     }
     /** Hide the profile and clear the current feature. @returns {this} */
     clear() { return this.setFeature(null); }
     /**
-     * @returns {?{distance:number,ascent:number,descent:number,min:number,max:number,maxAbsSlope:number,points:number}}
+     * @returns {?{distance:number,duration:?number,ascent:number,descent:number,min:number,max:number,maxAbsSlope:number,points:number}}
+     * `duration` is `null` when the track carries no time data.
      */
     getStats() { return this._stats; }
     /** @param {string|Object} t Theme name or colors object. @returns {this} */
@@ -456,20 +674,82 @@ import * as d3 from 'd3';
       if (patch && 'collapsable' in patch) this._applyCollapsable();
       if (patch && 'zoom' in patch) this._updateZoomButtons();
       if (patch && typeof patch.width !== 'undefined' && typeof patch.width === 'number') this.options.width = patch.width;
-      if (this._feature) { this._compute(); this._updateZoomButtons(); if (!this._collapsed) this._render(); }
+      if (patch && 'dem' in patch) { this._demZ = null; this._demFor = null; }
+      if (this._feature) { this._compute(); this._fillFromDem(this._feature); this._updateZoomButtons(); if (this._collapsed) this._renderTitle(); else this._render(); }
       return this;
     }
 
-    // ---------- calcul ------------------------------------------------
+    // ---------- digital elevation model -------------------------------
+    /**
+     * Fills the missing elevations from a terrain model, then redraws.
+     *
+     * **A track is filled entirely or not at all.** A profile missing a few points is not
+     * an incomplete profile: points without Z count as zero, the line dives to sea level
+     * and the ascent total becomes absurd. Better the flat profile we would have had
+     * without the DEM.
+     *
+     * Nothing is reported to the user on failure — the fill is a supplement, it has no
+     * business breaking a display that succeeded without it. The `demload` event lets the
+     * application know if it wants to.
+     *
+     * @param {import('ol/Feature').default} feature
+     * @fires demload
+     * @private
+     */
+    _fillFromDem(feature) {
+      const cfg = demConfig(this.options.dem);
+      if (!cfg || !feature || this._demFor === feature) return;
+      if (ElevationProfile.featureHasZ(feature)) return;              // the track already carries its Z
+      if (typeof Image === 'undefined' || typeof document === 'undefined') return;
+
+      const geom = feature.getGeometry && feature.getGeometry();
+      if (!geom) return;
+      const lines = geomLines(geom);
+      const dataProj = this.options.dataProjection || (this.getMap() && this.getMap().getView().getProjection()) || 'EPSG:3857';
+      const lonlats = [];
+      for (const seg of lines) for (const c of seg) lonlats.push(toLonLat(c, dataProj));
+      if (!lonlats.length) return;
+
+      // Sequence number: a track clicked while another is loading must win, otherwise the
+      // slowest response would overwrite the profile on screen.
+      const seq = ++this._demSeq;
+      const sampler = new DemSampler(cfg);
+      const z = demZoomFor(sampler, lonlats, cfg);
+      this._demLoading = true;
+      sampler.load(sampler.tilesFor(lonlats, z)).then((ok) => {
+        // A newer fill has taken over: it owns _demLoading and will clear it itself.
+        if (seq !== this._demSeq || this._feature !== feature) return;
+        const zs = ok ? lonlats.map((ll) => sampler.sample(ll[0], ll[1], z)) : null;
+        const complete = !!zs && zs.every((v) => v != null && isFinite(v));
+        this._demLoading = false;
+        if (complete) { this._demZ = zs; this._demFor = feature; this._compute(); }
+        // Redrawn even on failure: the spinner has to give way to the flat profile.
+        this._updateZoomButtons();
+        if (!this._collapsed) this._render();
+        /**
+         * Fired once a terrain-model fill has completed (or failed).
+         * @event demload
+         * @property {boolean} ok Whether every point could be sampled.
+         * @property {number} zoom Tile zoom level used.
+         * @property {number} tiles Tiles fetched.
+         */
+        this.dispatchEvent({ type: 'demload', ok: complete, zoom: z, tiles: sampler.tiles.size });
+      });
+    }
+
+    // ---------- computation -------------------------------------------
     _compute() {
       const o = this.options;
       const geom = this._feature.getGeometry();
-      const lines = geom.getType() === 'MultiLineString' ? geom.getCoordinates() : [geom.getCoordinates()];
+      const lines = geomLines(geom);
       const dataProj = o.dataProjection || (this.getMap() && this.getMap().getView().getProjection()) || 'EPSG:3857';
+
+      // Terrain-model elevations, if they were loaded for THIS feature.
+      const demZ = (this._demFor === this._feature) ? this._demZ : null;
 
       const times = extractTimes(this._feature, lines);
       this._hasTime = !!times;
-      const ignoreStops = o.ignoreStops !== false;                   // défaut : ignore les arrêts
+      const ignoreStops = o.ignoreStops !== false;                   // default: stops are excluded
       const stopSpeed = (o.stopSpeed != null ? o.stopSpeed : 0.5);   // m/s
       const pts = [];
       let cum = 0, prev = null, i = -1, tAcc = 0, prevMs = null;
@@ -482,13 +762,14 @@ import * as d3 from 'd3';
         if (times && times[i] != null) {
           const ms = times[i];
           if (prevMs != null) {
-            const dt = (ms - prevMs) / 1000;                          // s sur le segment
+            const dt = (ms - prevMs) / 1000;                          // seconds over the segment
             if (dt > 0 && (!ignoreStops || (dseg / dt) >= stopSpeed)) tAcc += dt;
           }
           t = tAcc; prevMs = ms;
         }
         prev = ll;
-        pts.push({ x: cum, z: (c.length > 2 && isFinite(c[2])) ? c[2] : 0, coord: c, t });
+        const z = (c.length > 2 && isFinite(c[2])) ? c[2] : (demZ ? demZ[i] : 0);
+        pts.push({ x: cum, z, coord: c, t });
       }
       if (o.smoothing > 0) this._smooth(pts, o.smoothing);
 
@@ -508,11 +789,13 @@ import * as d3 from 'd3';
       const distance = samples.length ? samples[samples.length - 1].x - samples[0].x : 0;
       const ta = samples.length ? samples[0].t : null, tb = samples.length ? samples[samples.length - 1].t : null;
       const duration = (ta != null && tb != null) ? (tb - ta) : null;
+      // Reported for a closed ring too, where they are equal by construction: on a loop,
+      // D+ is exactly the figure one is after.
       return { distance, duration, ascent, descent, min: isFinite(zmin) ? zmin : 0, max: isFinite(zmax) ? zmax : 0, maxAbsSlope: maxAbs, points: samples.length };
     }
     _smooth(pts, meters) {
       if (!(meters > 0) || pts.length < 3) return;
-      const half = meters / 2;                     // fenêtre = ±(meters/2) le long du tracé
+      const half = meters / 2;                     // window = +/-(meters/2) along the track
       const z = pts.map((p) => p.z);
       let lo = 0, hi = 0, sum = 0;
       for (let i = 0; i < pts.length; i++) {
@@ -537,20 +820,20 @@ import * as d3 from 'd3';
       if (samples.length) samples[0].slope = samples.length > 1 ? samples[1].slope : 0;
     }
 
-    // ---------- pente : couleurs --------------------------------------
+    // ---------- slope: colours ----------------------------------------
     _slopeScale() {
       const cs = this.options.slopeClassSize || 2.5;
       const maxClasses = this.options.maxClasses || 8;
       const realIdx = Math.max(1, Math.floor((this._stats.maxAbsSlope || 0) / cs));
-      const maxIdx = Math.min(realIdx, maxClasses - 1);   // au plus `maxClasses` classes (défaut 8)
-      const capped = realIdx > maxIdx;                    // des pentes dépassent la dernière classe
+      const maxIdx = Math.min(realIdx, maxClasses - 1);   // at most `maxClasses` classes (default 8)
+      const capped = realIdx > maxIdx;                    // some slopes overflow the last class
       let colorByIndex;
       if (this.slopeColors && this.slopeColors.length) {
         const interp = d3.interpolateRgbBasis(this.slopeColors);
         colorByIndex = (idx) => interp(maxIdx ? idx / maxIdx : 0);
       } else {
-        // rampe à arrêts non uniformes : partie froide (bleu-vert, peu lisible) compressée,
-        // jaune PUR au milieu, puis orange, rouge. classe 0 = bleu, classe max = rouge.
+        // Ramp with non-uniform stops: the cold end (blue-green, hard to read) is squeezed,
+        // PURE yellow in the middle, then orange, red. Class 0 = blue, top class = red.
         const ramp = d3.scaleLinear()
           .domain([0, 0.16, 0.42, 0.68, 1])
           .range(['#2166ac', '#27a35a', '#ffe000', '#f4791f', '#d7191c'])
@@ -562,8 +845,8 @@ import * as d3 from 'd3';
     }
     _classIndex(slope, sc) { return Math.min(sc.maxIdx, Math.floor(Math.abs(slope) / sc.classSize)); }
 
-    // ---------- temps : format adaptatif ------------------------------
-    // 7 sec · 26 min · 1 h 48 min · 2 j 3 h (jours + heures normalisés)
+    // ---------- time: adaptive format ---------------------------------
+    // 7 sec | 26 min | 1 h 48 min | 2 d 3 h (days + hours normalised)
     _fmtDuration(sec) {
       if (sec == null || !isFinite(sec)) return '';
       const u = (this.options.labels && this.options.labels.durationUnits) || { s: 'sec', m: 'min', h: 'h', d: 'j' };
@@ -580,14 +863,35 @@ import * as d3 from 'd3';
       return h ? `${d} ${u.d} ${h} ${u.h}` : `${d} ${u.d}`;
     }
 
-    // ---------- entête + légende --------------------------------------
-    _renderHeader() {
-      const o = this.options, s = this._stats, f = this._feature;
+    // ---------- header + legend ---------------------------------------
+    /**
+     * Track title, and its optional link.
+     *
+     * Its own method because it is the only part of the header that stays visible once
+     * collapsed — the CSS hides the body, the stats, the legend and the toolbar. `_render`
+     * is skipped while collapsed, so without a separate entry point the title would keep
+     * naming the previous track after a change of feature.
+     */
+    _renderTitle() {
+      const o = this.options, f = this._feature;
+      if (!f) return;
       const name = (f.get && f.get(o.titleProperty)) || 'Profil';
       const linkUrl = o.titleLink && f.get && f.get(o.titleLink);
       if (isUrl(linkUrl)) this._titleEl.innerHTML = `<a href="${esc(linkUrl)}" target="_blank" rel="noopener">${esc(name)}</a>`;
       else this._titleEl.textContent = name;
       this._titleEl.setAttribute('title', name);
+    }
+
+    _renderHeader() {
+      const o = this.options, s = this._stats, f = this._feature;
+      this._renderTitle();
+      // While the elevations are still unknown, every figure would read zero: a D+ of 0 m
+      // then jumping to 1 200 is worse than no figure at all.
+      if (this._demLoading) {
+        this._statsEl.innerHTML = ''; this._statsEl.removeAttribute('title');
+        this._legendEl.innerHTML = ''; this._legendEl.style.display = 'none';
+        return;
+      }
 
       const html = [], text = [];
       o.headerItems.forEach((it) => {
@@ -623,18 +927,40 @@ import * as d3 from 'd3';
       } else this._legendEl.style.display = 'none';
     }
 
-    // ---------- rendu -------------------------------------------------
+    /**
+     * Spinner shown in place of the chart while the terrain model loads.
+     *
+     * It keeps the chart's height so the panel does not jump when the profile replaces it,
+     * and it carries no colour of its own: the CSS takes `--oep-area`, which `_applyTheme`
+     * has just set - the theme colour, or the track colour under `color: 'auto'`.
+     */
+    _renderSpinner() {
+      const H = typeof this.options.height === 'number' ? this.options.height : 180;
+      this._body.innerHTML = '';
+      const box = document.createElement('div');
+      box.className = 'oep-loading';
+      box.style.height = `${H}px`;
+      box.setAttribute('role', 'status');
+      box.setAttribute('aria-label', this.options.labels.loading);
+      const sp = document.createElement('div');
+      sp.className = 'oep-spinner';
+      box.appendChild(sp);
+      this._body.appendChild(box);
+    }
+
+    // ---------- rendering ---------------------------------------------
     _render() {
       const o = this.options, s = this._stats, data = this._samples;
       if (!data || !data.length) return;
       this._applyTheme();
       const mobile = this._applyPlacement();
       this._renderHeader();
+      if (this._demLoading) { this._renderSpinner(); return; }
 
       const m = o.margins, u = m.unit || 'px';
       const toPx = (v) => u === 'px' ? v : v * (parseFloat(getComputedStyle(this.element).fontSize) || 16);
 
-      // largeur : 100% en mobile ; 'auto'/'100%'/'full' = largeur de la carte ; sinon nombre plafonné à la carte
+      // Width: 100% on mobile; 'auto'/'100%'/'full' = map width; otherwise a number capped to the map
       const avail = this._availWidth();
       const isAuto = (o.width === 'auto' || o.width === '100%' || o.width === 'full');
       const desktopW = isAuto ? avail : Math.min(typeof o.width === 'number' ? o.width : (parseFloat(o.width) || avail), avail);
@@ -671,7 +997,7 @@ import * as d3 from 'd3';
           const cls = this._classIndex(data[i].slope, sc);
           let j = i; while (j + 1 < data.length && this._classIndex(data[j + 1].slope, sc) === cls) j++;
           g.append('path').datum(data.slice(i - 1, j + 1)).attr('class', 'oep-area-slope').attr('fill', sc.colorByIndex(cls)).attr('d', areaGen);
-          if (i > 1) seps.push(data[i - 1]);   // changement de classe = frontière
+          if (i > 1) seps.push(data[i - 1]);   // a class change is a boundary
           i = j + 1;
         }
         if (o.slopeSeparators) seps.forEach((d) => {
@@ -687,7 +1013,7 @@ import * as d3 from 'd3';
       g.append('text').attr('class', 'oep-axis-label').attr('x', innerW).attr('y', innerH + mb - 4).attr('text-anchor', 'end').text(distAxisLabel(o.units));
       g.append('g').attr('class', 'oep-axis oep-axis-y').call(d3.axisLeft(y).ticks(yTicks).tickFormat((d) => o.units === 'imperial' ? Math.round(d * 3.28084) : d));
 
-      // marqueurs A / B en cours de sélection
+      // A / B markers while a range is being picked
       if (o.zoom && !this._cropMode) {
         [['A', this._zoomA], ['B', this._zoomB]].forEach(([nm, val]) => {
           if (val == null) return;
@@ -760,6 +1086,29 @@ import * as d3 from 'd3';
       if (map && this._feature) map.getView().fit(this._feature.getGeometry().getExtent(), { padding: [40, 40, 40, 40], duration: 400 });
     }
 
+    /**
+     * Point of the profiled outline closest to a map coordinate.
+     *
+     * A polygon's own `getClosestPoint` answers for its **surface**: with the cursor inside
+     * the ring it returns the cursor itself, so the marker would follow the pointer across
+     * the whole shape instead of sliding along the outline. Lines keep the geometry's own
+     * answer, which is exact rather than limited to the decimated samples.
+     */
+    _closestOnProfile(coordinate) {
+      const g = this._feature && this._feature.getGeometry();
+      if (!g) return null;
+      if (!/Polygon/.test(g.getType())) return g.getClosestPoint(coordinate);
+      const data = this._fullSamples;
+      if (!data || !data.length) return null;
+      let best = null, bd = Infinity;
+      for (const p of data) {
+        const dx = p.coord[0] - coordinate[0], dy = p.coord[1] - coordinate[1];
+        const dd = dx * dx + dy * dy;
+        if (dd < bd) { bd = dd; best = p.coord; }
+      }
+      return best;
+    }
+
     // ---------- focus -------------------------------------------------
     _tooltipText(d) {
       const o = this.options, parts = [];
@@ -797,7 +1146,7 @@ import * as d3 from 'd3';
       this._legendEl.innerHTML = ''; this._legendEl.style.display = 'none';
       this._titleEl.textContent = this.options.labels.empty; this._titleEl.removeAttribute('title');
       this._statsEl.innerHTML = ''; this._statsEl.removeAttribute('title');
-      this._cropMode = false; this._updateZoomButtons();
+      this._cropMode = false; this._demLoading = false; this._updateZoomButtons();
       this._clearFocus();
       this.element.style.display = 'none';
       this._adjustAttribution();
@@ -811,6 +1160,9 @@ import * as d3 from 'd3';
    */
   ElevationProfile.addTheme = (name, colors) => { THEMES[name] = colors; };
   ElevationProfile.THEMES = THEMES;
+  /** Known keyless terrain-tile sources, keyed by `dem.source` name. */
+  ElevationProfile.DEM_PRESETS = DEM_PRESETS;
+  ElevationProfile.DemSampler = DemSampler;
   ElevationProfile.POSITIONS = POSITIONS;
   ElevationProfile.version = '0.6.0';
 

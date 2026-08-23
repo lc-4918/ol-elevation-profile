@@ -3,7 +3,7 @@ layout: home
 hero:
   name: ol-elevation-profile
   text: Elevation profiles for OpenLayers
-  tagline: A synchronized, themeable elevation profile control rendered with d3 — reading elevation straight from your 3D GPX/GeoJSON.
+  tagline: A synchronized, themeable elevation profile control rendered with d3 — reading elevation straight from your 3D GPX/GeoJSON, and from keyless terrain tiles when they carry none.
   image:
     src: /screenshot-profile.png
     alt: Elevation profile coloured by slope class
@@ -16,7 +16,7 @@ hero:
       link: https://lc-4918.github.io/ol-elevation-profile/demo/
 features:
   - title: Reads Z from the geometry
-    details: No elevation service is queried. Distance, ascent/descent and min/max come from your 3D track.
+    details: Distance, ascent/descent and min/max come straight from your 3D track. A track without Z is filled from keyless terrain tiles, on by default.
   - title: Map ↔ chart sync
     details: Hover the map or the chart and a marker stays in sync on both.
   - title: Slope classes

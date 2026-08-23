@@ -3,7 +3,7 @@ layout: home
 hero:
   name: ol-elevation-profile
   text: Profils altimétriques pour OpenLayers
-  tagline: Un contrôle de profil altimétrique synchronisé et thématisable, rendu avec d3, qui lit l'altitude directement dans vos GPX/GeoJSON 3D.
+  tagline: Un contrôle de profil altimétrique synchronisé et thématisable, rendu avec d3, qui lit l'altitude directement dans vos GPX/GeoJSON 3D — et dans des tuiles de terrain sans clé quand ils n'en portent pas.
   image:
     src: /screenshot-profile.png
     alt: Profil altimétrique coloré par classe de pente
@@ -16,7 +16,7 @@ hero:
       link: https://lc-4918.github.io/ol-elevation-profile/demo/
 features:
   - title: Lit le Z dans la géométrie
-    details: Aucun service d'altitude. Distance, D+/D- et min/max calculés depuis votre tracé 3D.
+    details: Distance, D+/D- et min/max calculés directement depuis votre tracé 3D. Un tracé sans Z se complète depuis des tuiles de terrain sans clé, actif par défaut.
   - title: Synchro carte ↔ profil
     details: Survolez la carte ou le profil, un indicateur reste synchronisé sur les deux.
   - title: Classes de pente

@@ -1,0 +1,129 @@
+name: Build & Release
+
+# Actions epinglees au dernier majeur tournant sur Node.js 24, comme sur trailog.
+#
+# Deux comportements selon ce qui est pousse :
+#   - push sur une branche  -> build de verification, dist/ en artifact de l'execution
+#   - push d'un tag vX.Y.Z  -> publication sur npmjs + GitHub Release
+
+on:
+  push:
+    branches:
+      - '**'
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  build:
+    name: Build & test
+    if: startsWith(github.ref, 'refs/heads/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      # Build avant test : le smoke test charge le bundle produit dans dist/.
+      - name: Build bundles
+        run: npm run build
+
+      - run: npm test
+
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ol-elevation-profile-dist-${{ github.sha }}
+          path: dist/
+
+  release:
+    name: Publish to npm & create GitHub Release
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # creation de la Release
+      id-token: write        # provenance npm (attestation Sigstore)
+    steps:
+      # fetch-depth: 0 : les notes de version comparent ce tag au precedent ; un checkout
+      # superficiel n'aurait ni les commits ni les tags.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          registry-url: 'https://registry.npmjs.org'   # ecrit le .npmrc d'authentification
+
+      # Le contrat de version : npm publie ce que dit package.json, pas ce que dit le tag.
+      # Sans ce garde-fou, taguer v0.7.0 en oubliant de bumper package.json republierait
+      # silencieusement 0.6.0 -- ou echouerait 3 minutes plus tard sur un 403 illisible.
+      # On verifie aussi que la version n'existe pas deja sur npmjs : une version publiee
+      # est definitive, npm refuse de l'ecraser.
+      - name: Check version contract
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          PKG=$(node -p "require('./package.json').version")
+          if [ "$VERSION" != "$PKG" ]; then
+            echo "::error::Le tag ${TAG} annonce ${VERSION}, package.json dit ${PKG}." \
+                 "Bumper package.json (npm version) avant de taguer."
+            exit 1
+          fi
+          NAME=$(node -p "require('./package.json').name")
+          if npm view "${NAME}@${VERSION}" version >/dev/null 2>&1; then
+            echo "::error::${NAME}@${VERSION} est deja publie sur npmjs. Une version publiee" \
+                 "ne peut pas etre remplacee : passer a la version suivante."
+            exit 1
+          fi
+          echo "PKG_VERSION=${VERSION}" >> "$GITHUB_ENV"
+
+      - run: npm ci
+
+      # Build avant test : le smoke test charge le bundle produit dans dist/.
+      - name: Build bundles
+        run: npm run build
+
+      - run: npm test
+
+      # Le tarball exact qui part sur npmjs, joint a la Release : il fige ce que contenait
+      # le paquet publie, meme si npmjs devenait un jour inaccessible.
+      - name: Pack tarball
+        run: npm pack --pack-destination "$RUNNER_TEMP"
+
+      # npm d'abord, la Release ensuite : si la publication echoue, aucune Release ne vient
+      # annoncer une version qui n'existe pas sur le registre.
+      #
+      # --provenance signe le paquet via l'OIDC de l'execution (d'ou id-token: write) et
+      # affiche le badge "Built and signed on GitHub Actions" sur npmjs. L'attestation lie
+      # le tarball a ce depot et a ce commit ; elle exige que repository.url de package.json
+      # designe bien ce depot.
+      - name: Publish to npm
+        run: npm publish --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # La Release est publiee sous l'identite du PAT fourni, et non sous celle du
+      # GITHUB_TOKEN de l'execution, qui appartient a github-actions[bot] et apparaitrait
+      # alors comme auteur. L'auteur d'une release ne peut pas etre change apres coup.
+      # A defaut de secret RELEASE_PAT, on retombe sur le token de l'execution : la Release
+      # est correcte, seul son auteur affiche est le bot.
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          token: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            ${{ runner.temp }}/*.tgz
+            dist/ol-elevation-profile.js
+            dist/ol-elevation-profile.esm.js
+            dist/ol-elevation-profile.min.js
+            dist/ol-elevation-profile.css

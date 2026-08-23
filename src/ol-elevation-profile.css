@@ -21,7 +21,7 @@
 }
 .ol-elevation-profile.oep-transparent { backdrop-filter: blur(2px); }
 
-/* ---- 8 ancrages ---- */
+/* ---- 8 anchors ---- */
 .ol-elevation-profile.oep-pos-bottom       { left: 50%; bottom: .6em; transform: translateX(-50%); }
 .ol-elevation-profile.oep-pos-top          { left: 50%; top: .6em;    transform: translateX(-50%); }
 .ol-elevation-profile.oep-pos-left         { left: .6em; top: 50%;    transform: translateY(-50%); }
@@ -31,12 +31,12 @@
 .ol-elevation-profile.oep-pos-bottom-left  { left: .6em;  bottom: .6em; }
 .ol-elevation-profile.oep-pos-bottom-right { right: .6em; bottom: .6em; }
 
-/* ---- mobile : pleine largeur, collé en haut ou en bas ---- */
+/* ---- mobile: full width, pinned to the top or the bottom ---- */
 .ol-elevation-profile.oep-mobile { left: 0 !important; right: 0 !important; width: auto !important; transform: none !important; }
 .ol-elevation-profile.oep-mobile.oep-pos-bottom { bottom: 0; border-radius: 10px 10px 0 0; }
 .ol-elevation-profile.oep-mobile.oep-pos-top    { top: 0;    border-radius: 0 0 10px 10px; }
 
-/* ---- entête ---- */
+/* ---- header ---- */
 .oep-header { display: flex; align-items: center; gap: 8px; width: 100%; padding: 0 2px 2px; }
 .oep-title  { flex: 0 1 auto; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .oep-title a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
@@ -45,7 +45,7 @@
 .oep-stats .oep-up   { color: #c0392b; }
 .oep-stats .oep-down { color: #2471a3; }
 
-/* ---- barre d'outils zoom ---- */
+/* ---- zoom toolbar ---- */
 .oep-toolbar { flex: 0 0 auto; display: inline-flex; gap: 2px; margin-left: auto; }
 .oep-tbtn {
   display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 22px;
@@ -65,20 +65,36 @@
 .oep-toggle:hover { opacity: 1; background: rgba(0, 0, 0, .07); }
 .oep-toggle svg { width: 15px; height: 15px; display: block; }
 
-/* ---- légende de pente ---- */
+/* ---- slope legend ---- */
 .oep-legend { display: flex; flex-wrap: wrap; gap: 4px 10px; padding: 0 2px 4px; font-size: 10px; opacity: .9; }
 .oep-leg-it { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 .oep-sw { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
 
 .oep-body { overflow: hidden; }
 
-/* ---- mode réduit : on rétracte le contrôle à la largeur Titre + bouton ---- */
+/* ---- collapsed mode: the control shrinks to title + button width ---- */
 .ol-elevation-profile.oep-collapsed { width: auto !important; }
 .ol-elevation-profile.oep-collapsed .oep-body,
 .ol-elevation-profile.oep-collapsed .oep-legend { display: none !important; }
 .ol-elevation-profile.oep-collapsed .oep-stats,
 .ol-elevation-profile.oep-collapsed .oep-toolbar { display: none !important; }
 .ol-elevation-profile.oep-collapsed .oep-header { width: auto; }
+
+/* ---- terrain-model loading spinner ---- */
+/* Takes --oep-area, so it wears the theme colour - and the track colour under color:'auto'. */
+.oep-loading { display: flex; align-items: center; justify-content: center; }
+.oep-spinner {
+  width: 26px; height: 26px; box-sizing: border-box;
+  border: 3px solid var(--oep-area);
+  border-top-color: transparent;
+  border-radius: 50%;
+  opacity: .9;
+  animation: oep-spin .8s linear infinite;
+}
+@keyframes oep-spin { to { transform: rotate(360deg); } }
+/* A still ring reads as a broken control rather than a wait, so the motion stays -
+   slowed to a crawl, which is what the reduced-motion request is really about. */
+@media (prefers-reduced-motion: reduce) { .oep-spinner { animation-duration: 4s; } }
 
 /* ---- chart ---- */
 .oep-svg { display: block; }
