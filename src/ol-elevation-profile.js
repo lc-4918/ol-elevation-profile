@@ -34,6 +34,53 @@ import * as d3 from 'd3';
 
   const POSITIONS = ['top', 'bottom', 'left', 'right', 'top-left', 'top-right', 'bottom-left', 'bottom-right'];
 
+  /**
+   * Jeux de libellés livrés avec la librairie. `en` est le défaut et la retombée : une
+   * langue inconnue rend l'anglais plutôt que des clés vides ou un mélange.
+   *
+   * Un jeu est complet, jamais partiel. Une traduction à trous laisserait deux langues
+   * cohabiter dans le même panneau, ce qui se voit ; `labels` reste là pour corriger une
+   * clé isolée sans avoir à redéclarer les autres.
+   *
+   * `ascent` et `descent` valent `D+` / `D-` partout : la notation est celle des cartes et
+   * des topos, pas un mot à traduire.
+   */
+  const LOCALES = {
+    en: {
+      distance: 'Distance', elevation: 'Elevation', slope: 'Slope',
+      ascent: 'D+', descent: 'D-', empty: 'Click a track',
+      time: 'Time', duration: 'Duration',
+      durationUnits: { s: 'sec', m: 'min', h: 'h', d: 'd' },
+      zoomStart: 'Set start (A)', zoomEnd: 'Set end (B)', zoomAll: 'Show all',
+      zoomBack: 'Back one level',
+      exportPng: 'Export as PNG',
+      collapse: 'Collapse the profile', expand: 'Expand the profile',
+      loading: 'Loading the elevation profile'
+    },
+    fr: {
+      distance: 'Distance', elevation: 'Altitude', slope: 'Pente',
+      ascent: 'D+', descent: 'D-', empty: 'Cliquez un tracé',
+      time: 'Temps', duration: 'Durée',
+      durationUnits: { s: 'sec', m: 'min', h: 'h', d: 'j' },
+      zoomStart: 'Définir le début (A)', zoomEnd: 'Définir la fin (B)', zoomAll: 'Tout voir',
+      zoomBack: 'Revenir au niveau précédent',
+      exportPng: 'Exporter en PNG',
+      collapse: 'Réduire le profil', expand: 'Agrandir le profil',
+      loading: 'Chargement du profil altimétrique'
+    },
+    es: {
+      distance: 'Distancia', elevation: 'Altitud', slope: 'Pendiente',
+      ascent: 'D+', descent: 'D-', empty: 'Haga clic en una traza',
+      time: 'Tiempo', duration: 'Duración',
+      durationUnits: { s: 'seg', m: 'min', h: 'h', d: 'd' },
+      zoomStart: 'Definir el inicio (A)', zoomEnd: 'Definir el final (B)', zoomAll: 'Ver todo',
+      zoomBack: 'Volver al nivel anterior',
+      exportPng: 'Exportar como PNG',
+      collapse: 'Contraer el perfil', expand: 'Desplegar el perfil',
+      loading: 'Cargando el perfil de elevación'
+    }
+  };
+
   const DEFAULTS = {
     immersion: 'docked',
     position: 'bottom',
@@ -59,6 +106,8 @@ import * as d3 from 'd3';
     maxClasses: 8,                // maximum number of slope classes (colours + legend)
     xTicks: null,
     yTicks: null,
+    verticalScale: 'auto',        // 'auto' : le profil remplit la hauteur ;
+                                  // un nombre : mètres par centimètre physique
     show: 'click',
     collapsable: true,
     collapsed: false,
@@ -68,6 +117,7 @@ import * as d3 from 'd3';
     responsive: true,             // adapts width/placement, mobile included
     mobileBreakpoint: 640,        // <= screen width -> mobile mode (100% width, top/bottom)
     zoom: false,                  // start/end buttons cropping map + profile to A..B
+    zoomLevels: 3,                // niveaux de recadrage imbriqués (1 = l'ancien niveau unique)
     exportPng: false,             // toolbar button exporting the panel as a PNG
     ignoreStops: true,            // duration = moving time (stops excluded)
     stopSpeed: 0.5,               // stop threshold in m/s (~1.8 km/h)
@@ -75,16 +125,14 @@ import * as d3 from 'd3';
     headerItems: ['distance', 'ascent', 'descent', 'minmax'],
     titleProperty: 'name',
     titleLink: null,
-    labels: {
-      distance: 'Distance', elevation: 'Altitude', slope: 'Pente',
-      ascent: 'D+', descent: 'D-', empty: 'Cliquez un tracé',
-      time: 'Temps', duration: 'Durée',
-      durationUnits: { s: 'sec', m: 'min', h: 'h', d: 'j' },
-      zoomStart: 'Définir le début (A)', zoomEnd: 'Définir la fin (B)', zoomAll: 'Tout voir',
-      exportPng: 'Exporter en PNG',
-      loading: 'Chargement du profil altimétrique'
-    }
+    lang: 'en',                   // 'en' | 'fr' | 'es' : jeu de libellés livré
+    labels: {}                    // surcharges clé à clé, appliquées par-dessus la langue
   };
+
+  /** Libellés de la langue [lang], corrigés par les surcharges [over]. */
+  function resolveLabels(lang, over) {
+    return deepMerge(LOCALES[lang] || LOCALES.en, over || null);
+  }
 
   // ----- helpers ---------------------------------------------------------
   function deepMerge(base, over) {
@@ -188,7 +236,12 @@ import * as d3 from 'd3';
   const ICON_A = '<svg viewBox="0 0 24 24"><path d="M7 5v14M11 12h8m0 0-3-3m3 3-3 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   const ICON_B = '<svg viewBox="0 0 24 24"><path d="M17 5v14M13 12H5m0 0 3-3m-3 3 3 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   const ICON_PNG = '<svg viewBox="0 0 24 24"><path d="M12 4v10m0 0 4-4m-4 4-4-4M5 18h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const ICON_BACK = '<svg viewBox="0 0 24 24"><path d="M10 6 4 12l6 6M4 12h10a6 6 0 0 1 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   const ICON_ALL = '<svg viewBox="0 0 24 24"><path d="M4 12h16M4 12l4-4M4 12l4 4M20 12l-4-4M20 12l-4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+  // Recherche du segment contenant une abscisse. Construit une fois : le survol la sollicite
+  // à chaque mouvement de souris.
+  const bisectX = d3.bisector((d) => d.x).left;
 
   // ----- digital elevation model (DEM) -----------------------------------
   /**
@@ -196,7 +249,7 @@ import * as d3 from 'd3';
    *
    * A PNG tile carries elevation in its R/G/B channels; it is read on a canvas rather
    * than queried point by point from an API. That is what makes a 10 000-point track a
-   * handful of requests, with no key, no quota and no rate limit — where the free
+   * handful of requests, with no key, no quota and no rate limit, where the free
    * elevation APIs cap out at 100 or 200 points per call.
    *
    * Attribution is not automatic: the library does not own the map. It is up to the
@@ -293,7 +346,7 @@ import * as d3 from 'd3';
   const DEM_DEFAULTS = { source: 'terrarium', zoom: 'auto', maxZoom: 14, maxTiles: 32, concurrency: 6, tileSize: 256 };
 
   /**
-   * RGB → metres decoders, one per encoding convention.
+   * RGB to metres decoders, one per encoding convention.
    *
    * `encoding` also takes a function `(r, g, b, a) => metres`, for a tile set that packs
    * elevation its own way. Return null where the pixel carries no measurement: the fill is
@@ -602,7 +655,7 @@ import * as d3 from 'd3';
      *
      * Bilinear rather than "the pixel containing the point": on a 30 or 90 m model, taking
      * the pixel value makes the profile advance in stairs, and every stair counts as a
-     * climb then a descent in the ascent total. The interpolation invents no relief — it
+     * climb then a descent in the ascent total. The interpolation invents no relief: it
      * renders the same surface, without the steps of the sampling grid.
      */
     sample(lon, lat, z) {
@@ -670,8 +723,8 @@ import * as d3 from 'd3';
   }
 
   /**
-   * The `dem` option (true | source name | sampling function | object) → a full
-   * configuration, or null.
+   * The `dem` option (true | source name | sampling function | object) into
+   * a full configuration, or null.
    *
    * A `sample` function short-circuits the tile machinery entirely: the application
    * answers with the elevations itself, from wherever it can reach them - a GeoServer
@@ -740,12 +793,19 @@ import * as d3 from 'd3';
    * @property {boolean} [slope=false] Split the profile into slope-class colored portions.
    * @property {number} [slopeClassSize=2.5] Slope class width, in percent.
    * @property {number} [maxClasses=8] Maximum number of slope classes (colors + legend).
-   * @property {?string[]} [slopeColors=null] `null` = blue→red ramp; otherwise an interpolated color array.
+   * @property {?string[]} [slopeColors=null] `null` = blue-to-red ramp; otherwise an interpolated color array.
    * @property {boolean} [slopeSeparators=true] Vertical separator at each slope-class change.
    * @property {boolean} [slopeLegend=true] Color legend under the title.
    * @property {number} [smoothing=0] Elevation smoothing window, in METERS (0 = none).
    * @property {?number} [xTicks=null] X axis ticks (null = auto from width).
    * @property {?number} [yTicks=null] Y axis ticks (null = auto from height).
+   * @property {('auto'|number)} [verticalScale='auto'] `'auto'`: the profile fills the
+   *   height, which is legible but changes scale from one track to the next, so a 2 % ramp
+   *   looks like a wall and two profiles cannot be compared. A number fixes the metres
+   *   covered per physical centimetre. It is a **floor**, not a cage: a track whose range
+   *   exceeds what the height can show would spill out of the frame, which is worse than
+   *   losing comparability: the scale then widens silently, nothing being drawn on the
+   *   chart to say so.
    * @property {'click'|'mouseover'} [show='click'] How a track is selected on the map.
    * @property {boolean} [hideOnMapClick=true] Click on empty map hides the profile.
    * @property {boolean} [collapsable=true] Show the collapse/expand button.
@@ -755,20 +815,27 @@ import * as d3 from 'd3';
    * @property {boolean} [responsive=true] Adapt width/placement; mobile included.
    * @property {number} [mobileBreakpoint=640] Below this width: mobile mode (100% width, top/bottom only).
    * @property {boolean} [zoom=false] A/B buttons to crop map + profile to a sub-range.
+   * @property {number} [zoomLevels=3] Nested crops allowed: a crop can itself be cropped,
+   *   down to this depth. `1` restores the former single level. A "back" button appears
+   *   from the second level; "show all" empties the stack whatever the depth.
    * @property {boolean} [exportPng=false] Toolbar button exporting the whole panel as a PNG.
    * @property {boolean} [ignoreStops=true] When computing time, ignore stopped segments (moving time).
    * @property {number} [stopSpeed=0.5] Speed threshold (m/s) below which a segment counts as a stop.
    * @property {Array<'distance'|'elevation'|'slope'|'time'>} [tooltipItems=['distance','elevation']] Tooltip content (`'time'` = elapsed time at the cursor, if the track has time data).
    * @property {Array<string|{property:string,label?:string,asLink?:boolean,linkText?:string}>} [headerItems] Header content (string tokens: distance, ascent, descent, min, max, minmax, `'duration'` = total elapsed time).
+   * @property {('en'|'fr'|'es')} [lang='en'] Language of the shipped labels. An unknown
+   *   code falls back to English rather than leaving keys empty.
+   * @property {Object} [labels={}] Per-key overrides applied on top of `lang`. They survive
+   *   a later language change, so a corrected key stays corrected.
    * @property {string} [titleProperty='name'] Feature property used as the title.
-   * @property {?string} [titleLink=null] Feature property holding a URL → clickable title.
+   * @property {?string} [titleLink=null] Feature property holding a URL, making the title a link.
    * @property {number} [maxPoints=2000] Decimation for render/interaction (stats use full data).
    * @property {?import('ol/proj/Projection').default|string} [dataProjection=null] Projection of the feature coordinates.
    * @property {?(boolean|string|Function|Object)} [dem='terrarium'] Fill missing elevations
    *   from a terrain model. Sources: `'terrarium'` (default) or `true` = AWS Terrain Tiles;
    *   `'ign'` = IGN Géoplateforme RGE ALTI (France, keyless, `apiKey` optional);
    *   `{url}` = XYZ template; `{wms:{url,layers,params}}` = WMS tiles;
-   *   `{olSource}` = any `ol/source/TileImage` (XYZ, TileWMS, …);
+   *   `{olSource}` = any `ol/source/TileImage` (XYZ, TileWMS, and so on);
    *   `{featureInfo:{url,layers,property}}` = WMS GetFeatureInfo, one request per point,
    *   for a greyscale coverage that cannot be decoded from its pixels (slow);
    *   a function or `{sample}` `(lonlats, ctx) => number[]|Promise<number[]>` to source them
@@ -790,22 +857,36 @@ import * as d3 from 'd3';
     constructor(opts) {
       const o = deepMerge(DEFAULTS, opts || {});
       if (POSITIONS.indexOf(o.position) === -1) o.position = 'bottom';
+      // Les surcharges sont gardées à part de leur résultat : changer de langue plus tard
+      // doit reprendre le jeu neuf de la nouvelle langue sans perdre ce que l'appelant a
+      // corrigé, ce que le seul jeu résolu ne permettrait plus de démêler.
+      const userLabels = o.labels;
+      o.labels = resolveLabels(o.lang, userLabels);
       const element = buildElement(o);
       super({ element, target: opts && opts.target });
 
       this.options = o;
+      this._userLabels = userLabels;
       this.slopeColors = o.slopeColors || null;
       this._feature = null;
       this._fullSamples = null; this._fullStats = null;
       this._samples = null; this._stats = null;
       this._marker = null;
       this._collapsed = !!o.collapsed;
-      this._cropMode = false; this._zoomA = null; this._zoomB = null; this._armed = null; this._fitRes = null;
+      this._crops = []; this._off = 0;
+      this._zoomA = null; this._zoomB = null; this._armed = null;
       this._demZ = null; this._demFor = null; this._demSeq = 0; this._demLoading = false;
       this._onResize = () => { if (this._feature && !this._collapsed) this._render(); };
       this._buildDom(element);
       element.style.display = 'none';
     }
+
+    /** Recadré dès qu'un niveau est empilé. Lu partout où le booléen l'était. */
+    get _cropMode() { return this._crops.length > 0; }
+    /** Profondeur courante ; 0 quand on voit la trace entière. */
+    get _cropDepth() { return this._crops.length; }
+    /** Niveaux imbriqués autorisés, au moins un. */
+    get _cropMax() { const n = this.options.zoomLevels; return n == null ? 3 : Math.max(1, n | 0); }
 
     // ---------- static helpers ----------------------------------------
     /**
@@ -853,6 +934,7 @@ import * as d3 from 'd3';
       };
       this._btnA = mkBtn('oep-a', ICON_A, o.labels.zoomStart, () => this._arm('A'));
       this._btnB = mkBtn('oep-b', ICON_B, o.labels.zoomEnd, () => this._arm('B'));
+      this._btnBack = mkBtn('oep-back', ICON_BACK, o.labels.zoomBack, () => this._popCrop());
       this._btnAll = mkBtn('oep-all', ICON_ALL, o.labels.zoomAll, () => this._exitZoom());
       // Last of the toolbar, so it sits to the right of the zoom buttons.
       this._btnPng = mkBtn('oep-png', ICON_PNG, o.labels.exportPng, () => this.exportPNG());
@@ -860,11 +942,11 @@ import * as d3 from 'd3';
 
       const btn = document.createElement('button');
       btn.className = 'oep-toggle'; btn.type = 'button';
-      btn.setAttribute('aria-label', 'Réduire ou agrandir le profil');
       btn.innerHTML = this._collapsed ? ICON_EXPAND : ICON_COLLAPSE;
       btn.addEventListener('click', () => this.toggleCollapsed());
       header.appendChild(btn);
       this._toggleBtn = btn;
+      this._applyToggleLabel();
 
       this._legendEl = document.createElement('div'); this._legendEl.className = 'oep-legend'; this._legendEl.style.display = 'none';
       this._body = document.createElement('div'); this._body.className = 'oep-body';
@@ -875,6 +957,34 @@ import * as d3 from 'd3';
       if (this._collapsed) root.classList.add('oep-collapsed');
     }
 
+    /**
+     * Reporte les libellés courants sur ce que le rendu ne réécrit pas.
+     *
+     * Les boutons et le bouton de repli sont construits une fois pour toutes ; sans cela,
+     * changer de langue ne toucherait que le graphe et laisserait les infobulles dans
+     * l'ancienne. Le titre n'est repris que faute de tracé : sinon il porte le nom du tracé,
+     * qui n'est pas un libellé de la librairie.
+     */
+    _applyLabels() {
+      const l = this.options.labels;
+      const set = (b, t) => { if (b && t) { b.title = t; b.setAttribute('aria-label', t); } };
+      set(this._btnA, l.zoomStart); set(this._btnB, l.zoomEnd);
+      set(this._btnBack, l.zoomBack); set(this._btnAll, l.zoomAll); set(this._btnPng, l.exportPng);
+      this._applyToggleLabel();
+      if (this._titleEl && !this._feature) this._titleEl.textContent = l.empty;
+    }
+    /**
+     * Le bouton de repli dit ce qu'il va faire, non ce qu'il montre.
+     *
+     * Un seul libellé pour les deux états ("réduire ou agrandir") laisse deviner lequel
+     * des deux le clic déclenche ; l'icône, elle, a déjà basculé. Le titre suit donc l'état,
+     * et l'infobulle visible dit la même chose que le nom accessible.
+     */
+    _applyToggleLabel() {
+      const l = this.options.labels, t = this._collapsed ? l.expand : l.collapse;
+      if (!this._toggleBtn || !t) return;
+      this._toggleBtn.title = t; this._toggleBtn.setAttribute('aria-label', t);
+    }
     _resolveColor() { const o = this.options; if (!o.color) return null; if (o.color === 'auto') return this._featureColor(); return o.color; }
     _featureColor() {
       const f = this._feature; if (!f) return null;
@@ -915,6 +1025,7 @@ import * as d3 from 'd3';
       this._collapsed = (typeof force === 'boolean') ? force : !this._collapsed;
       this.element.classList.toggle('oep-collapsed', this._collapsed);
       this._toggleBtn.innerHTML = this._collapsed ? ICON_EXPAND : ICON_COLLAPSE;
+      this._applyToggleLabel();
       if (!this._collapsed && this._feature) this._render();
       this._adjustAttribution();
     }
@@ -979,19 +1090,32 @@ import * as d3 from 'd3';
       });
 
       this._mapKeys = [];
-      this._mapKeys.push(map.on(o.show === 'mouseover' ? 'pointermove' : 'click', (evt) => {
-        const feature = lineAt(evt.pixel); if (feature && feature !== this._feature) this.setFeature(feature);
+      // `show`, `hideOnMapClick` et `followMap` sont relus à l'événement, non à
+      // l'abonnement. Les abonnements sont posés une fois pour toutes, ici ; les figer
+      // rendait ces trois options muettes dès que `setOptions` les changeait ensuite,
+      // basculer en survol ne faisait rien, sans que rien ne le dise. Les deux types
+      // d'événement sont donc écoutés en permanence, et c'est l'option qui tranche.
+      this._mapKeys.push(map.on('click', (evt) => {
+        const feature = lineAt(evt.pixel);
+        if (this.options.show !== 'mouseover' && feature && feature !== this._feature) this.setFeature(feature);
+        if (this.options.hideOnMapClick && !feature && this._feature) this.clear();
       }));
-      if (o.hideOnMapClick) this._mapKeys.push(map.on('click', (evt) => { if (!lineAt(evt.pixel) && this._feature) this.clear(); }));
-      if (o.followMap) this._mapKeys.push(map.on('pointermove', (evt) => {
-        if (!this._feature || this._collapsed) return;
+      this._mapKeys.push(map.on('pointermove', (evt) => {
+        if (this.options.show === 'mouseover') {
+          const feature = lineAt(evt.pixel);
+          if (feature && feature !== this._feature) this.setFeature(feature);
+        }
+        // Le survol coûte un `lineAt` par déplacement : rien n'est cherché tant qu'aucune
+        // des deux options ne le demande.
+        if (!this.options.followMap || !this._feature || this._collapsed) return;
         const cp = this._closestOnProfile(evt.coordinate); if (!cp) return;
         const px = map.getPixelFromCoordinate(cp); if (!px) return;
         if (Math.hypot(px[0] - evt.pixel[0], px[1] - evt.pixel[1]) < 14) this._focusByCoord(cp); else this._clearFocus();
       }));
       // leave the A/B crop when the map is zoomed out
       this._mapKeys.push(map.on('moveend', () => {
-        if (this._cropMode && this._fitRes && map.getView().getResolution() > this._fitRes * 1.25) this._exitZoom();
+        const cur = this._crops[this._crops.length - 1];
+        if (cur && cur.fitRes && map.getView().getResolution() > cur.fitRes * 1.25) this._popCrop();
       }));
       this._mapKeys.push(map.on('change:size', this._onResize));
     }
@@ -1006,7 +1130,7 @@ import * as d3 from 'd3';
      */
     setFeature(feature) {
       this._feature = feature || null;
-      this._cropMode = false; this._zoomA = null; this._zoomB = null; this._armed = null;
+      this._crops = []; this._off = 0; this._zoomA = null; this._zoomB = null; this._armed = null;
       if (!feature) { this._fullSamples = this._samples = null; this._demZ = this._demFor = null; this._clear(); return this; }
       this.element.style.display = '';
       this._compute();
@@ -1040,6 +1164,13 @@ import * as d3 from 'd3';
       if (patch && (patch.theme || 'color' in patch)) this._applyTheme();
       if (patch && ('transparency' in patch || 'transparencyLevel' in patch)) this._applyTransparency();
       if (patch && 'collapsable' in patch) this._applyCollapsable();
+      if (patch && 'labels' in patch) this._userLabels = deepMerge(this._userLabels || {}, patch.labels);
+      // Recalculé depuis la langue, jamais empilé sur le jeu précédent : passer de 'fr' à
+      // 'es' ne doit rien laisser en français derrière lui, hors surcharges de l'appelant.
+      if (patch && ('lang' in patch || 'labels' in patch)) {
+        this.options.labels = resolveLabels(this.options.lang, this._userLabels);
+        this._applyLabels();
+      }
       if (patch && ('zoom' in patch || 'exportPng' in patch)) this._updateZoomButtons();
       if (patch && typeof patch.width !== 'undefined' && typeof patch.width === 'number') this.options.width = patch.width;
       if (patch && 'dem' in patch) { this._demZ = null; this._demFor = null; }
@@ -1056,7 +1187,7 @@ import * as d3 from 'd3';
      * and the ascent total becomes absurd. Better the flat profile we would have had
      * without the DEM.
      *
-     * Nothing is reported to the user on failure — the fill is a supplement, it has no
+     * Nothing is reported to the user on failure: the fill is a supplement, it has no
      * business breaking a display that succeeded without it. The `demload` event lets the
      * application know if it wants to.
      *
@@ -1186,7 +1317,60 @@ import * as d3 from 'd3';
       this._addSlope(samples);
       this._fullSamples = samples;
       this._fullStats = this._statsOf(samples, true);
-      this._samples = samples; this._stats = this._fullStats;
+      // Un recalcul (option changée, altitudes arrivées du MNT) ne doit pas défaire le
+      // recadrage : la pile est rejouée sur les nouveaux échantillons. Pile vide, on
+      // retombe sur la trace entière, ce que faisait l'affectation directe d'avant.
+      this._applyCrops();
+    }
+    /**
+     * Pixels CSS d'un centimètre physique, mesurés plutôt que déduits.
+     *
+     * Le rapport nominal est de 96 px par pouce, soit 37,8 px par centimètre, mais le zoom
+     * du navigateur le déplace : mesurer un élément d'un centimètre suit ce zoom là où une
+     * constante mentirait. Non mémorisé - la mesure force un calcul de disposition, mais un
+     * rendu est rare et un cache se périmerait au premier Ctrl+molette.
+     */
+    _pxPerCm() {
+      try {
+        const temoin = document.createElement('div');
+        temoin.style.cssText = 'position:absolute;left:-9999px;top:0;width:1cm;height:1cm';
+        (this.element || document.body).appendChild(temoin);
+        const px = temoin.getBoundingClientRect().height;
+        temoin.remove();
+        if (px > 0) return px;
+      } catch (e) { /* document indisponible : on retombe sur la valeur nominale */ }
+      return 96 / 2.54;
+    }
+
+    /**
+     * Échelle verticale du graphe.
+     *
+     * En `'auto'`, le profil remplit la hauteur : c'est lisible, mais l'échelle change d'une
+     * trace à l'autre, si bien qu'une pente de 2 % y prend l'allure d'un mur et que deux
+     * profils ne se comparent pas. Un nombre fixe au contraire les mètres couverts par
+     * centimètre physique.
+     *
+     * La valeur demandée est un **plancher**, non un carcan : une trace dont l'amplitude
+     * dépasse ce que la hauteur peut montrer déborderait du cadre, ce qui est pire que de
+     * perdre la comparabilité. Le graphe n'en dit rien : l'échelle n'est pas une donnée de
+     * la trace et n'a pas à encombrer le dessin ; l'échelle réellement appliquée est
+     * seulement publiée dans `_vScale`, à qui veut la connaître.
+     *
+     * `nice()` n'est pas appliqué en échelle absolue : il arrondit le domaine vers
+     * l'extérieur, donc il fausserait le rapport qu'on vient de fixer.
+     */
+    _yScale(s, zpad, innerH) {
+      const o = this.options, bas = s.min - zpad, haut = s.max + zpad;
+      const vs = typeof o.verticalScale === 'number' ? o.verticalScale : 0;
+      if (!(vs > 0)) {
+        this._vScale = null;
+        return d3.scaleLinear().domain([bas, haut]).range([innerH, 0]).nice();
+      }
+      const cm = innerH / this._pxPerCm();            // hauteur du graphe, en centimètres
+      const etendue = Math.max(vs * cm, haut - bas);  // jamais moins qu'il n'en faut
+      const milieu = (bas + haut) / 2;
+      this._vScale = etendue / cm;                    // m/cm effectivement appliqués
+      return d3.scaleLinear().domain([milieu - etendue / 2, milieu + etendue / 2]).range([innerH, 0]);
     }
     _statsOf(samples, fromTotal) {
       let ascent = 0, descent = 0, zmin = Infinity, zmax = -Infinity, maxAbs = 0;
@@ -1258,7 +1442,7 @@ import * as d3 from 'd3';
     // 7 sec | 26 min | 1 h 48 min | 2 d 3 h (days + hours normalised)
     _fmtDuration(sec) {
       if (sec == null || !isFinite(sec)) return '';
-      const u = (this.options.labels && this.options.labels.durationUnits) || { s: 'sec', m: 'min', h: 'h', d: 'j' };
+      const u = (this.options.labels && this.options.labels.durationUnits) || LOCALES.en.durationUnits;
       sec = Math.max(0, Math.round(sec));
       if (sec < 60) return sec + ' ' + u.s;
       if (sec < 3600) return Math.round(sec / 60) + ' ' + u.m;
@@ -1277,7 +1461,7 @@ import * as d3 from 'd3';
      * Track title, and its optional link.
      *
      * Its own method because it is the only part of the header that stays visible once
-     * collapsed — the CSS hides the body, the stats, the legend and the toolbar. `_render`
+     * collapsed: the CSS hides the body, the stats, the legend and the toolbar. `_render`
      * is skipped while collapsed, so without a separate entry point the title would keep
      * naming the previous track after a change of feature.
      */
@@ -1310,7 +1494,7 @@ import * as d3 from 'd3';
           else if (it === 'descent') { html.push(`<span class="oep-down">${o.labels.descent} ${fmtElevation(s.descent, o.units)}</span>`); text.push(`${o.labels.descent} ${fmtElevation(s.descent, o.units)}`); }
           else if (it === 'min') { html.push(fmtElevation(s.min, o.units)); text.push(fmtElevation(s.min, o.units)); }
           else if (it === 'max') { html.push(fmtElevation(s.max, o.units)); text.push(fmtElevation(s.max, o.units)); }
-          else if (it === 'minmax') { const v = `${fmtElevation(s.min, o.units)}–${fmtElevation(s.max, o.units)}`; html.push(v); text.push(v); }
+          else if (it === 'minmax') { const v = `${fmtElevation(s.min, o.units)}-${fmtElevation(s.max, o.units)}`; html.push(v); text.push(v); }
           else if (it === 'duration') { if (s.duration != null) { const v = this._fmtDuration(s.duration); html.push(`<span class="oep-time">${esc(o.labels.duration)} ${v}</span>`); text.push(`${o.labels.duration} ${v}`); } }
         } else if (it && it.property) {
           const val = f.get && f.get(it.property); if (val == null || val === '') return;
@@ -1327,7 +1511,7 @@ import * as d3 from 'd3';
         const sc = this._slopeScale();
         for (let idx = 0; idx <= sc.maxIdx; idx++) {
           const color = sc.colorByIndex(idx);
-          const label = (sc.capped && idx === sc.maxIdx) ? `≥ ${idx * sc.classSize} %` : `${idx * sc.classSize}–${(idx + 1) * sc.classSize} %`;
+          const label = (sc.capped && idx === sc.maxIdx) ? `≥ ${idx * sc.classSize} %` : `${idx * sc.classSize}-${(idx + 1) * sc.classSize} %`;
           const item = document.createElement('span'); item.className = 'oep-leg-it';
           item.innerHTML = `<i class="oep-sw" style="background:${color}"></i>${label}`;
           this._legendEl.appendChild(item);
@@ -1390,7 +1574,7 @@ import * as d3 from 'd3';
 
       const x = d3.scaleLinear().domain([0, s.distance]).range([0, innerW]);
       const zpad = (s.max - s.min) * 0.1 || 10;
-      const y = d3.scaleLinear().domain([s.min - zpad, s.max + zpad]).range([innerH, 0]).nice();
+      const y = this._yScale(s, zpad, innerH);
       this._x = x; this._y = y; this._dims = { innerW, innerH };
 
       if (o.grid) g.append('g').attr('class', 'oep-grid').call(d3.axisLeft(y).ticks(yTicks).tickSize(-innerW).tickFormat(''));
@@ -1423,7 +1607,7 @@ import * as d3 from 'd3';
       g.append('g').attr('class', 'oep-axis oep-axis-y').call(d3.axisLeft(y).ticks(yTicks).tickFormat((d) => o.units === 'imperial' ? Math.round(d * 3.28084) : d));
 
       // A / B markers while a range is being picked
-      if (o.zoom && !this._cropMode) {
+      if (o.zoom && this._cropDepth < this._cropMax) {
         [['A', this._zoomA], ['B', this._zoomB]].forEach(([nm, val]) => {
           if (val == null) return;
           const px = x(val);
@@ -1438,21 +1622,13 @@ import * as d3 from 'd3';
       const lbl = focus.append('g').attr('class', 'oep-focus-label'); lbl.append('rect').attr('class', 'oep-focus-bg'); lbl.append('text').attr('class', 'oep-focus-txt');
       this._focus = focus;
 
-      const bisect = d3.bisector((d) => d.x).left;
       const pick = (event) => { const mx = d3.pointer(event, g.node())[0]; return Math.max(0, Math.min(s.distance, x.invert(mx))); };
       const overlay = svg.append('rect').attr('class', 'oep-overlay').attr('x', ml).attr('y', mt).attr('width', innerW).attr('height', innerH);
       overlay.on('mousemove', (event) => {
-        const x0 = pick(event); const idx = bisect(data, x0, 1);
-        const d0 = data[idx - 1], d1 = data[idx] || d0; const d = (x0 - d0.x) > (d1.x - x0) ? d1 : d0;
+        const d = this._sampleAt(pick(event)); if (!d) return;
         this._setFocus(d); if (this._marker) this._marker.setPosition(d.coord);
       }).on('mouseout', () => this._clearFocus());
-      overlay.on('click', (event) => {
-        if (!this._armed || this._cropMode) return;
-        const x0 = pick(event);
-        if (this._armed === 'A') this._zoomA = x0; else this._zoomB = x0;
-        this._armed = null; this._updateZoomButtons();
-        if (this._zoomA != null && this._zoomB != null) this._applyZoom(); else this._render();
-      });
+      overlay.on('click', (event) => this._placeBound(pick(event)));
       if (this._armed) overlay.style('cursor', 'col-resize');
       this._adjustAttribution();
     }
@@ -1591,6 +1767,22 @@ import * as d3 from 'd3';
 
     // ---------- zoom A/B ----------------------------------------------
     _arm(which) { this._armed = (this._armed === which) ? null : which; this._updateZoomButtons(); if (this._focus) this._render(); }
+    /**
+     * Pose la borne armée à l'abscisse [x0], puis arme l'autre tant qu'elle manque.
+     *
+     * Poser A n'a d'intérêt que pour poser B ensuite : enchaîner d'un clic sur l'autre
+     * évite l'aller-retour par la barre d'outils entre les deux. Les deux bornes réunies,
+     * le recadrage part et rien ne reste armé.
+     */
+    _placeBound(x0) {
+      if (!this._armed || this._cropDepth >= this._cropMax) return;
+      const autre = this._armed === 'A' ? 'B' : 'A';
+      if (this._armed === 'A') this._zoomA = x0; else this._zoomB = x0;
+      const complet = this._zoomA != null && this._zoomB != null;
+      this._armed = complet ? null : autre;
+      this._updateZoomButtons();
+      if (complet) this._pushCrop(this._zoomA, this._zoomB); else this._render();
+    }
     _updateZoomButtons() {
       const o = this.options, has = !!this._feature;
       const show = !!o.zoom && has;
@@ -1598,37 +1790,96 @@ import * as d3 from 'd3';
       // The toolbar carries both: it stays visible as long as either has something to show.
       this._toolbar.style.display = (show || png) ? '' : 'none';
       this._btnPng.style.display = png ? '' : 'none';
-      const crop = this._cropMode;
-      this._btnA.style.display = show && !crop ? '' : 'none';
-      this._btnB.style.display = show && !crop ? '' : 'none';
-      this._btnAll.style.display = show && crop ? '' : 'none';
+      const deep = this._cropDepth, peutDescendre = deep < this._cropMax;
+      this._btnA.style.display = show && peutDescendre ? '' : 'none';
+      this._btnB.style.display = show && peutDescendre ? '' : 'none';
+      // Au premier niveau, revenir et tout voir sont le même geste : seul "tout voir"
+      // paraît, ce qui laisse le niveau unique (zoomLevels: 1) exactement tel qu'il était.
+      this._btnBack.style.display = show && deep > 1 ? '' : 'none';
+      this._btnAll.style.display = show && deep > 0 ? '' : 'none';
       this._btnA.classList.toggle('armed', this._armed === 'A');
       this._btnB.classList.toggle('armed', this._armed === 'B');
     }
-    _applyZoom() {
-      const a = Math.min(this._zoomA, this._zoomB), b = Math.max(this._zoomA, this._zoomB);
-      const raw = this._fullSamples.filter((p) => p.x >= a && p.x <= b);
-      if (raw.length < 2) return;
-      const off = raw[0].x;                       // A devient 0
-      const tOff = raw[0].t != null ? raw[0].t : 0;
-      const cropped = raw.map((p) => ({ x: p.x - off, z: p.z, coord: p.coord, slope: p.slope, t: (p.t != null ? p.t - tOff : null) }));
-      const coords = raw.map((p) => p.coord);
-      this._samples = cropped; this._stats = this._statsOf(cropped, false); this._cropMode = true;
-      this._updateZoomButtons(); this._render();
-      const map = this.getMap();
-      if (map) {
-        const ext = boundingExtent(coords);
-        const view = map.getView();
-        try { this._fitRes = view.getResolutionForExtent(ext, map.getSize()); } catch (e) { this._fitRes = null; }
-        view.fit(ext, { padding: [40, 40, 40, 40], duration: 400 });
+    /**
+     * Recadre sur le sommet de la pile : échantillons, statistiques, origine des abscisses.
+     *
+     * Les bornes empilées sont gardées en abscisse de la trace **entière**, jamais dans le
+     * repère du niveau courant : sinon chaque cran se lirait dans celui du précédent et
+     * l'erreur de rebasage se composerait de niveau en niveau. Rend les coordonnées
+     * cartographiques du niveau, dont le cadrage a besoin.
+     */
+    _applyCrops() {
+      if (!this._crops.length) {
+        this._off = 0; this._samples = this._fullSamples; this._stats = this._fullStats;
+        return null;
       }
+      const { a, b } = this._crops[this._crops.length - 1];
+      const raw = this._fullSamples.filter((p) => p.x >= a && p.x <= b);
+      if (raw.length < 2) { this._crops.pop(); return this._applyCrops(); }
+      const off = raw[0].x, tOff = raw[0].t != null ? raw[0].t : 0;
+      this._off = off;
+      this._samples = raw.map((p) => ({ x: p.x - off, z: p.z, coord: p.coord, slope: p.slope, t: (p.t != null ? p.t - tOff : null) }));
+      this._stats = this._statsOf(this._samples, false);
+      return raw.map((p) => p.coord);
     }
-    _exitZoom() {
-      this._cropMode = false; this._zoomA = null; this._zoomB = null; this._armed = null; this._fitRes = null;
-      this._samples = this._fullSamples; this._stats = this._fullStats;
+
+    /** Cadre la carte sur un niveau, ou sur la trace entière si [coords] est nul. */
+    _fitMap(coords) {
+      const map = this.getMap(); if (!map) return null;
+      let ext = null;
+      if (coords && coords.length) ext = boundingExtent(coords);
+      else if (this._feature) ext = this._feature.getGeometry().getExtent();
+      if (!ext) return null;
+      const view = map.getView();
+      let res = null;
+      try { res = view.getResolutionForExtent(ext, map.getSize()); } catch (e) { res = null; }
+      view.fit(ext, { padding: [40, 40, 40, 40], duration: 400 });
+      return res;
+    }
+
+    /** Empile un niveau. [a0] et [b0] sont lus dans le repère du niveau courant. */
+    _pushCrop(a0, b0) {
+      this._zoomA = null; this._zoomB = null; this._armed = null;
+      if (this._cropDepth >= this._cropMax) { this._updateZoomButtons(); this._render(); return; }
+      const a = this._off + Math.min(a0, b0), b = this._off + Math.max(a0, b0);
+      let n = 0;
+      for (let k = 0; k < this._fullSamples.length; k++) {
+        const px = this._fullSamples[k].x; if (px >= a && px <= b) n++;
+      }
+      if (n < 2) { this._updateZoomButtons(); this._render(); return; }
+      this._crops.push({ a, b, fitRes: null });
+      const coords = this._applyCrops();
+      this._updateZoomButtons(); this._render();
+      const cur = this._crops[this._crops.length - 1];
+      if (cur) cur.fitRes = this._fitMap(coords);
+    }
+
+    /**
+     * Recadre sur A..B déjà posés. Conservé : c'était le point d'entrée du niveau unique,
+     * et le supprimer casserait ce qui l'appelle sans rien apporter.
+     */
+    _applyZoom() {
+      if (this._zoomA == null || this._zoomB == null) return;
+      this._pushCrop(this._zoomA, this._zoomB);
+    }
+
+    /** Remonte d'un niveau. */
+    _popCrop() {
+      if (!this._crops.length) return;
+      this._crops.pop();
+      this._zoomA = null; this._zoomB = null; this._armed = null;
+      const coords = this._applyCrops();
       this._updateZoomButtons(); if (!this._collapsed) this._render();
-      const map = this.getMap();
-      if (map && this._feature) map.getView().fit(this._feature.getGeometry().getExtent(), { padding: [40, 40, 40, 40], duration: 400 });
+      this._fitMap(coords);
+    }
+
+    /** Vide la pile d'un coup, quel que soit le nombre de niveaux. */
+    _exitZoom() {
+      this._crops.length = 0;
+      this._zoomA = null; this._zoomB = null; this._armed = null;
+      this._applyCrops();
+      this._updateZoomButtons(); if (!this._collapsed) this._render();
+      this._fitMap(null);
     }
 
     /**
@@ -1643,13 +1894,31 @@ import * as d3 from 'd3';
       const g = this._feature && this._feature.getGeometry();
       if (!g) return null;
       if (!/Polygon/.test(g.getType())) return g.getClosestPoint(coordinate);
-      const data = this._fullSamples;
+      const hit = this._projectOn(this._fullSamples, coordinate);
+      return hit ? hit.coord : null;
+    }
+
+    /**
+     * Projeté d'une coordonnée sur la ligne brisée [data] : le point, et son abscisse
+     * curviligne dans le repère de [data].
+     *
+     * Retenir l'échantillon le plus proche ferait sauter le marqueur de sommet en sommet,
+     * l'écart entre deux points de trace étant souvent bien plus grand que le pas du
+     * pointeur. La projection sur les segments donne le point réellement visé.
+     */
+    _projectOn(data, coord) {
       if (!data || !data.length) return null;
+      if (data.length === 1) return { x: data[0].x, coord: data[0].coord.slice(0, 2) };
       let best = null, bd = Infinity;
-      for (const p of data) {
-        const dx = p.coord[0] - coordinate[0], dy = p.coord[1] - coordinate[1];
-        const dd = dx * dx + dy * dy;
-        if (dd < bd) { bd = dd; best = p.coord; }
+      for (let i = 1; i < data.length; i++) {
+        const a = data[i - 1].coord, b = data[i].coord;
+        const abx = b[0] - a[0], aby = b[1] - a[1], len2 = abx * abx + aby * aby;
+        // Segment dégénéré (deux points confondus) : le projeté est le point lui-même.
+        let r = len2 > 0 ? ((coord[0] - a[0]) * abx + (coord[1] - a[1]) * aby) / len2 : 0;
+        r = r < 0 ? 0 : (r > 1 ? 1 : r);
+        const px = a[0] + abx * r, py = a[1] + aby * r;
+        const dx = px - coord[0], dy = py - coord[1], dd = dx * dx + dy * dy;
+        if (dd < bd) { bd = dd; best = { x: data[i - 1].x + (data[i].x - data[i - 1].x) * r, coord: [px, py] }; }
       }
       return best;
     }
@@ -1679,11 +1948,42 @@ import * as d3 from 'd3';
       else if (x(d.x) - bb.width / 2 < 0) t.attr('text-anchor', 'start');
       else t.attr('text-anchor', 'middle');
     }
+    /**
+     * Point du profil à une abscisse quelconque, interpolé entre les deux échantillons qui
+     * l'encadrent.
+     *
+     * Se caler sur l'échantillon le plus proche ferait avancer le curseur de sommet en
+     * sommet : sur un tracé peu dense, ou décimé par `maxPoints`, le saut est franc et le
+     * survol perd sa continuité. Les échantillons sont les points *mesurés*, non les seules
+     * positions que le curseur ait le droit d'occuper.
+     *
+     * La pente n'est pas interpolée : `_addSlope` la pose sur le segment qui précède chaque
+     * échantillon, elle est donc constante sur ce segment et vaut celle de son extrémité.
+     * Le temps l'est, mais seulement si les deux bornes en portent un.
+     */
+    _sampleAt(x0) {
+      const data = this._samples;
+      if (!data || !data.length) return null;
+      if (data.length === 1) return data[0];
+      const xa = data[0].x, xb = data[data.length - 1].x;
+      const xc = Math.max(xa, Math.min(xb, x0));
+      const i = Math.min(Math.max(bisectX(data, xc, 1), 1), data.length - 1);
+      const d0 = data[i - 1], d1 = data[i];
+      const span = d1.x - d0.x, r = span > 0 ? (xc - d0.x) / span : 0;
+      const lerp = (a, b) => a + (b - a) * r;
+      return {
+        x: xc,
+        z: lerp(d0.z, d1.z),
+        coord: [lerp(d0.coord[0], d1.coord[0]), lerp(d0.coord[1], d1.coord[1])],
+        slope: d1.slope,
+        t: (d0.t != null && d1.t != null) ? lerp(d0.t, d1.t) : null
+      };
+    }
+    /** Suit une coordonnée de la carte, projetée sur le tracé courant. */
     _focusByCoord(coord) {
-      const data = this._samples; if (!data) return;
-      let best = null, bd = Infinity;
-      for (const p of data) { const dx = p.coord[0] - coord[0], dy = p.coord[1] - coord[1]; const dd = dx * dx + dy * dy; if (dd < bd) { bd = dd; best = p; } }
-      if (best) { this._setFocus(best); if (this._marker) this._marker.setPosition(best.coord); }
+      const hit = this._projectOn(this._samples, coord); if (!hit) return;
+      const d = this._sampleAt(hit.x); if (!d) return;
+      this._setFocus(d); if (this._marker) this._marker.setPosition(d.coord);
     }
     _clearFocus() { if (this._focus) this._focus.style('display', 'none'); if (this._marker) this._marker.setPosition(undefined); }
     _clear() {
@@ -1691,7 +1991,7 @@ import * as d3 from 'd3';
       this._legendEl.innerHTML = ''; this._legendEl.style.display = 'none';
       this._titleEl.textContent = this.options.labels.empty; this._titleEl.removeAttribute('title');
       this._statsEl.innerHTML = ''; this._statsEl.removeAttribute('title');
-      this._cropMode = false; this._demLoading = false; this._updateZoomButtons();
+      this._crops = []; this._off = 0; this._demLoading = false; this._updateZoomButtons();
       this._clearFocus();
       this.element.style.display = 'none';
       this._adjustAttribution();

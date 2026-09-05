@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ol-elevation-profile — démo</title>
+  <title>ol-elevation-profile demo</title>
 
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@10.9.0/ol.css">
   <script src="https://cdn.jsdelivr.net/npm/ol@10.9.0/dist/ol.js"></script>
@@ -58,6 +58,8 @@
     .row select, .row input[type=range] { width: 124px; }
     .row select.dem { width: 160px; }
     .row input[type=range] { accent-color: var(--accent); }
+    /* A range keeps its accent colour when disabled, so it has to be dimmed by hand. */
+    .row :disabled { opacity: .4; cursor: not-allowed; }
     .row input[type=color] { width: 32px; height: 22px; padding: 0; border: 1px solid var(--rule); border-radius: 4px; background: #fff; }
     .val { opacity: .55; font-size: 11px; min-width: 38px; text-align: right; }
     .seg { display: flex; gap: 4px; margin: 5px 0; flex-wrap: wrap; }
@@ -68,101 +70,132 @@
     .chk label { display: inline-flex; align-items: center; gap: 4px; opacity: .85; cursor: pointer; }
     .mini { border: 1px solid var(--rule); background: #fff; border-radius: 6px; padding: 3px 7px;
       font: 11px ui-monospace, monospace; cursor: pointer; }
+    /* The native file input writes its own text in the BROWSER's language, which no page
+       setting reaches. Hidden behind a button of ours, the wording follows the demo. */
+    .file { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+    .file .name { opacity: .55; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   </style>
 </head>
 <body>
   <div id="map"></div>
-  <div id="alert"><span id="alert-msg"></span><button class="x" id="alert-x" title="Fermer">×</button></div>
+  <div id="alert"><span id="alert-msg"></span><button class="x" id="alert-x" data-i18n-title="close" title="Close">×</button></div>
 
   <header>
     <h1>ol-<b>elevation</b>-profile</h1>
-    <p>Click a track · hover the map or the chart · click empty space to hide.</p>
+    <p data-i18n="tagline">Click a track · hover the map or the chart · click empty space to hide.</p>
   </header>
 
-    <button id="gear" title="Menu réglages" aria-label="Menu réglages">
+    <button id="gear" data-i18n-title="settings" title="Settings menu" aria-label="Settings menu">
     <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
   </button>
   <div id="panel">
-    <h2>Track</h2>
-    <div class="seg" id="tracks"></div>
-    <div class="chk"><label>Import a file (GeoJSON / GPX / KML)
-      <input type="file" id="importFile" accept=".geojson,.json,.gpx,.kml,.xml" style="display:block;margin-top:4px">
-    </label></div>
+    <div class="row"><label data-i18n="language">language</label>
+      <select id="lang">
+        <option value="en" selected>English</option>
+        <option value="fr">français</option>
+        <option value="es">español</option>
+      </select></div>
 
-    <h2>Layout</h2>
-    <div class="row"><label>position</label>
+    <h2 data-i18n="secTrack">Track</h2>
+    <div class="seg" id="tracks"></div>
+    <div class="chk"><span data-i18n="import">Import a file (GeoJSON / GPX / KML)</span></div>
+    <div class="file">
+      <button class="mini" type="button" id="importBtn" data-i18n="chooseFile">Choose a file</button>
+      <!-- No data-i18n: refreshDynamic owns this one, it may hold a file name. -->
+      <span class="name" id="importName">No file chosen</span>
+      <input type="file" id="importFile" accept=".geojson,.json,.gpx,.kml,.xml" hidden>
+    </div>
+
+    <h2 data-i18n="secLayout">Layout</h2>
+    <div class="row"><label data-i18n="position">position</label>
       <select id="position">
         <option>bottom</option><option>top</option><option>left</option><option>right</option>
         <option>top-left</option><option>top-right</option><option>bottom-left</option><option>bottom-right</option>
       </select></div>
-    <div class="row"><label>width</label>
+    <div class="row"><label data-i18n="width">width</label>
       <input type="range" id="width" min="280" max="900" value="520"><span class="val" id="width_v">520</span></div>
-    <div class="seg"><button class="mini" id="widthAuto">width = map (auto)</button></div>
-    <div class="row"><label>height</label>
+    <div class="seg"><button class="mini" id="widthAuto" data-i18n="widthAuto">width = map (auto)</button></div>
+    <div class="row"><label data-i18n="height">height</label>
       <input type="range" id="height" min="100" max="300" value="180"><span class="val" id="height_v">180</span></div>
 
-    <h2>Appearance</h2>
-    <div class="row"><label>theme</label>
+    <h2 data-i18n="secAppearance">Appearance</h2>
+    <div class="row"><label data-i18n="theme">theme</label>
       <select id="theme">
         <option>steelblue</option><option>lime</option><option>purple</option>
         <option>slate</option><option>graphite</option><option>amber</option>
       </select></div>
-    <div class="row"><label>color</label>
+    <div class="row"><label data-i18n="color">color</label>
       <span><input type="color" id="color" value="#c4541a">
-        <button class="mini" id="colorTrace">track</button>
-        <button class="mini" id="colorReset">theme</button></span></div>
-    <div class="row"><label>background opacity</label>
+        <button class="mini" id="colorTrace" data-i18n="colorTrack">track</button>
+        <button class="mini" id="colorReset" data-i18n="colorTheme">theme</button></span></div>
+    <div class="row"><label data-i18n="opacity">background opacity</label>
       <input type="range" id="opacity" min="0" max="100" value="100"><span class="val" id="opacity_v">100%</span></div>
-    <div class="row"><label>xTicks</label>
-      <input type="range" id="xTicks" min="2" max="14" value="6"><span class="val" id="xTicks_v">auto</span></div>
-    <div class="row"><label>yTicks</label>
-      <input type="range" id="yTicks" min="2" max="10" value="4"><span class="val" id="yTicks_v">auto</span></div>
+    <div class="row"><label data-i18n="xTicks">xTicks</label>
+      <input type="range" id="xTicks" min="2" max="14" value="6"><span class="val" id="xTicks_v" data-i18n="auto">auto</span></div>
+    <div class="row"><label data-i18n="yTicks">yTicks</label>
+      <input type="range" id="yTicks" min="2" max="10" value="4"><span class="val" id="yTicks_v" data-i18n="auto">auto</span></div>
     <div class="seg">
-      <button data-flag="grid" class="on">grid</button>
-      <button data-flag="collapsable" class="on">collapsable</button>
-      <button data-flag="zoom">zoom A↔B</button>
-      <button data-flag="exportPng">export PNG</button>
+      <button data-flag="grid" data-i18n="flagGrid" class="on">grid</button>
+      <button data-flag="collapsable" data-i18n="flagCollapsable" class="on">collapsable</button>
+      <button data-flag="zoom" data-i18n="flagZoom">zoom A↔B</button>
+      <button data-flag="exportPng" data-i18n="flagExportPng">export PNG</button>
     </div>
-
-    <h2>Profile</h2>
-    <div class="row"><label>smoothing (m)</label>
-      <input type="range" id="smoothing" min="0" max="300" step="10" value="0"><span class="val" id="smoothing_v">off</span></div>
-    <div class="row"><label>DEM (no Z)</label>
-      <select id="dem" class="dem">
-        <option value="terrarium">terrarium (AWS, world)</option>
-        <option value="ign">ign (RGE ALTI, France)</option>
-        <option value="custom">custom function</option>
-        <option value="off">off</option>
+    <div class="row"><label data-i18n="zoomLevels">zoom levels</label>
+      <select id="zoomLevels" disabled>
+        <option value="1" data-i18n="zl1">1 (single)</option>
+        <option value="2">2</option>
+        <option value="3" selected>3</option>
+        <option value="4">4</option>
       </select></div>
 
-    <h2>Slope</h2>
-    <div class="seg"><button data-flag="slope">enable slope</button></div>
-    <div class="row"><label>class size</label>
-      <input type="range" id="slopeClassSize" min="1" max="5" step="0.5" value="2.5"><span class="val" id="slopeClassSize_v">2.5%</span></div>
+    <h2 data-i18n="secProfile">Profile</h2>
+    <div class="row"><label data-i18n="smoothing">smoothing (m)</label>
+      <input type="range" id="smoothing" min="0" max="500" step="20" value="0"><span class="val" id="smoothing_v">off</span></div>
+    <!-- The demo tracks sit between 138 and 644 m/cm at this panel height: below that,
+         the floor gives way and the value has no visible effect. Hence the coarse steps. -->
+    <div class="row"><label data-i18n="verticalScale">vertical scale</label>
+      <select id="verticalScale">
+        <option value="auto" selected data-i18n="vsAuto">auto (fills height)</option>
+        <option value="200">200 m/cm</option>
+        <option value="400">400 m/cm</option>
+        <option value="800">800 m/cm</option>
+      </select></div>
+    <div class="row"><label data-i18n="dem">DEM (no Z)</label>
+      <select id="dem" class="dem">
+        <option value="terrarium" data-i18n="demTerrarium">terrarium (AWS, world)</option>
+        <option value="ign" data-i18n="demIgn">ign (RGE ALTI, France)</option>
+        <option value="custom" data-i18n="demCustom">custom function</option>
+        <option value="off" data-i18n="demOff">off</option>
+      </select></div>
 
-    <h2>Units &amp; selection</h2>
-    <div class="row"><label>units</label>
-      <select id="units"><option value="meters">meters</option><option value="imperial">imperial</option></select></div>
-    <div class="row"><label>show</label>
+    <h2 data-i18n="secSlope">Slope</h2>
+    <div class="seg"><button data-flag="slope" data-i18n="flagSlope">enable slope</button></div>
+    <div class="row"><label data-i18n="classSize">class size</label>
+      <input type="range" id="slopeClassSize" min="1" max="5" step="0.5" value="2.5" disabled><span class="val" id="slopeClassSize_v">2.5%</span></div>
+
+    <h2 data-i18n="secUnits">Units &amp; selection</h2>
+    <div class="row"><label data-i18n="units">units</label>
+      <select id="units"><option value="meters" data-i18n="unitMeters">meters</option><option value="imperial" data-i18n="unitImperial">imperial</option></select></div>
+    <div class="row"><label data-i18n="show">show</label>
       <select id="show"><option>click</option><option>mouseover</option></select></div>
 
-    <h2>Tooltip</h2>
+    <h2 data-i18n="secTooltip">Tooltip</h2>
     <div class="chk" id="tooltipItems">
-      <label><input type="checkbox" value="distance" checked> distance</label>
-      <label><input type="checkbox" value="elevation" checked> elevation</label>
-      <label><input type="checkbox" value="slope"> slope</label>
-      <label><input type="checkbox" value="time"> elapsed time</label>
+      <label><input type="checkbox" value="distance" checked> <span data-i18n="itemDistance">distance</span></label>
+      <label><input type="checkbox" value="elevation" checked> <span data-i18n="itemElevation">elevation</span></label>
+      <label><input type="checkbox" value="slope"> <span data-i18n="itemSlope">slope</span></label>
+      <label><input type="checkbox" value="time"> <span data-i18n="itemTime">elapsed time</span></label>
     </div>
 
-    <h2>Header</h2>
+    <h2 data-i18n="secHeader">Header</h2>
     <div class="chk" id="headerItems">
-      <label><input type="checkbox" value="distance" checked> distance</label>
-      <label><input type="checkbox" value="ascent" checked> D+</label>
-      <label><input type="checkbox" value="descent" checked> D-</label>
-      <label><input type="checkbox" value="minmax" checked> min–max</label>
-      <label><input type="checkbox" value="duration"> total duration</label>
+      <label><input type="checkbox" value="distance" checked> <span data-i18n="itemDistance">distance</span></label>
+      <label><input type="checkbox" value="ascent" checked> <span data-i18n="itemAscent">D+</span></label>
+      <label><input type="checkbox" value="descent" checked> <span data-i18n="itemDescent">D-</span></label>
+      <label><input type="checkbox" value="minmax" checked> <span data-i18n="itemMinmax">min-max</span></label>
+      <label><input type="checkbox" value="duration"> <span data-i18n="itemDuration">total duration</span></label>
     </div>
-    <div class="chk"><label><input type="checkbox" id="titleLink"> link on the title (&laquo;&nbsp;link&nbsp;&raquo; property)</label></div>
+    <div class="chk"><label><input type="checkbox" id="titleLink"> <span data-i18n="titleLink">link on the title (&laquo;&nbsp;link&nbsp;&raquo; property)</span></label></div>
   </div>
 
   <script>
@@ -194,8 +227,8 @@
     const format = new ol.format.GeoJSON();
     const TRACKS = window.DEMO_TRACKS || [
       { id: 'gorgesAveyron', label: 'Gorges Aveyron' },
-      { id: 'dunRevel',      label: 'Dunkerque–Revel' },
-      { id: 'girAya',        label: 'Girona–Ayamonte' },
+      { id: 'dunRevel',      label: 'Dunkerque-Revel' },
+      { id: 'girAya',        label: 'Girona-Ayamonte' },
       { id: 'noZ_demo',      label: 'No elevation' }
     ];
     const getGeo = (id) => (window.TRACK_DATA && window.TRACK_DATA[id])
@@ -216,12 +249,110 @@
       map.getView().fit(feats[0].getGeometry().getExtent(), { padding: [70, 60, 230, 280], duration: 400 });
     });
 
+    // --- Demo UI wording ---------------------------------------------------
+    // The library translates its own panel; the demo around it is a page like any other,
+    // so it carries its own table. Keys are attached to the markup with data-i18n
+    // (text) and data-i18n-title (tooltip + accessible name).
+    const UI = {
+      en: {
+        tagline: 'Click a track · hover the map or the chart · click empty space to hide.',
+        settings: 'Settings menu', close: 'Close',
+        language: 'language',
+        secTrack: 'Track', secLayout: 'Layout', secAppearance: 'Appearance', secProfile: 'Profile',
+        secSlope: 'Slope', secUnits: 'Units & selection', secTooltip: 'Tooltip', secHeader: 'Header',
+        import: 'Import a file (GeoJSON / GPX / KML)',
+        chooseFile: 'Choose a file', noFile: 'No file chosen',
+        position: 'position', width: 'width', height: 'height', theme: 'theme', color: 'color',
+        opacity: 'background opacity', xTicks: 'xTicks', yTicks: 'yTicks',
+        zoomLevels: 'zoom levels', smoothing: 'smoothing (m)', verticalScale: 'vertical scale',
+        dem: 'DEM (no Z)', classSize: 'class size', units: 'units', show: 'show',
+        widthAuto: 'width = map (auto)', colorTrack: 'track', colorTheme: 'theme',
+        flagGrid: 'grid', flagCollapsable: 'collapsable', flagZoom: 'zoom A↔B',
+        flagExportPng: 'export PNG', flagSlope: 'enable slope',
+        zl1: '1 (single)', vsAuto: 'auto (fills height)',
+        demTerrarium: 'terrarium (AWS, world)', demIgn: 'ign (RGE ALTI, France)',
+        demCustom: 'custom function', demOff: 'off',
+        unitMeters: 'meters', unitImperial: 'imperial',
+        itemDistance: 'distance', itemElevation: 'elevation', itemSlope: 'slope',
+        itemTime: 'elapsed time', itemAscent: 'D+', itemDescent: 'D-', itemMinmax: 'min-max',
+        itemDuration: 'total duration',
+        titleLink: 'link on the title ("link" property)',
+        off: 'off', auto: 'auto', autoSuffix: '(auto)',
+        phrase: (list, many, lack) => `${many ? 'Tracks' : 'Track'} ${list} ${many ? 'have' : 'has'} no ${lack}.`,
+        lackZ: 'elevation',
+        lackZDem: 'elevation, and the terrain model could not supply it',
+        lackT: 'time',
+        noLine: 'No line (LineString) found in the file.',
+        importFailed: 'Import failed: '
+      },
+      fr: {
+        tagline: 'Cliquez un tracé · survolez la carte ou le profil · cliquez dans le vide pour masquer.',
+        settings: 'Menu réglages', close: 'Fermer',
+        language: 'langue',
+        secTrack: 'Tracé', secLayout: 'Placement', secAppearance: 'Apparence', secProfile: 'Profil',
+        secSlope: 'Pente', secUnits: 'Unités & sélection', secTooltip: 'Infobulle', secHeader: 'Entête',
+        import: 'Importer un fichier (GeoJSON / GPX / KML)',
+        chooseFile: 'Choisir un fichier', noFile: 'Aucun fichier choisi',
+        position: 'position', width: 'largeur', height: 'hauteur', theme: 'thème', color: 'couleur',
+        opacity: 'opacité du fond', xTicks: 'xTicks', yTicks: 'yTicks',
+        zoomLevels: 'niveaux de zoom', smoothing: 'lissage (m)', verticalScale: 'échelle verticale',
+        dem: 'MNT (sans Z)', classSize: 'taille de classe', units: 'unités', show: 'sélection',
+        widthAuto: 'largeur = carte (auto)', colorTrack: 'tracé', colorTheme: 'thème',
+        flagGrid: 'grille', flagCollapsable: 'repliable', flagZoom: 'zoom A↔B',
+        flagExportPng: 'export PNG', flagSlope: 'activer la pente',
+        zl1: '1 (unique)', vsAuto: 'auto (remplit la hauteur)',
+        demTerrarium: 'terrarium (AWS, monde)', demIgn: 'ign (RGE ALTI, France)',
+        demCustom: 'fonction sur mesure', demOff: 'désactivé',
+        unitMeters: 'mètres', unitImperial: 'impérial',
+        itemDistance: 'distance', itemElevation: 'altitude', itemSlope: 'pente',
+        itemTime: 'temps écoulé', itemAscent: 'D+', itemDescent: 'D-', itemMinmax: 'min-max',
+        itemDuration: 'durée totale',
+        titleLink: 'lien sur le titre (propriété "link")',
+        off: 'aucun', auto: 'auto', autoSuffix: '(auto)',
+        phrase: (list, many, lack) => `${many ? 'Les tracés' : 'Le tracé'} ${list} ${many ? "n'ont" : "n'a"} pas ${lack}.`,
+        lackZ: "d'altimétrie",
+        lackZDem: "d'altimétrie, et le modèle de terrain n'a pas pu la fournir",
+        lackT: 'de temps',
+        noLine: 'Aucune ligne (LineString) trouvée dans le fichier.',
+        importFailed: 'Import impossible : '
+      },
+      es: {
+        tagline: 'Haga clic en una traza · pase el ratón por el mapa o el perfil · clic en el vacío para ocultar.',
+        settings: 'Menú de ajustes', close: 'Cerrar',
+        language: 'idioma',
+        secTrack: 'Traza', secLayout: 'Disposición', secAppearance: 'Apariencia', secProfile: 'Perfil',
+        secSlope: 'Pendiente', secUnits: 'Unidades y selección', secTooltip: 'Información', secHeader: 'Encabezado',
+        import: 'Importar un archivo (GeoJSON / GPX / KML)',
+        chooseFile: 'Elegir un archivo', noFile: 'Ningún archivo elegido',
+        position: 'posición', width: 'anchura', height: 'altura', theme: 'tema', color: 'color',
+        opacity: 'opacidad del fondo', xTicks: 'xTicks', yTicks: 'yTicks',
+        zoomLevels: 'niveles de zoom', smoothing: 'suavizado (m)', verticalScale: 'escala vertical',
+        dem: 'MDT (sin Z)', classSize: 'tamaño de clase', units: 'unidades', show: 'selección',
+        widthAuto: 'anchura = mapa (auto)', colorTrack: 'traza', colorTheme: 'tema',
+        flagGrid: 'cuadrícula', flagCollapsable: 'plegable', flagZoom: 'zoom A↔B',
+        flagExportPng: 'exportar PNG', flagSlope: 'activar pendiente',
+        zl1: '1 (único)', vsAuto: 'auto (llena la altura)',
+        demTerrarium: 'terrarium (AWS, mundo)', demIgn: 'ign (RGE ALTI, Francia)',
+        demCustom: 'función propia', demOff: 'desactivado',
+        unitMeters: 'metros', unitImperial: 'imperial',
+        itemDistance: 'distancia', itemElevation: 'altitud', itemSlope: 'pendiente',
+        itemTime: 'tiempo transcurrido', itemAscent: 'D+', itemDescent: 'D-', itemMinmax: 'mín-máx',
+        itemDuration: 'duración total',
+        titleLink: 'enlace en el título (propiedad "link")',
+        off: 'ninguno', auto: 'auto', autoSuffix: '(auto)',
+        phrase: (list, many, lack) => `${many ? 'Las trazas' : 'La traza'} ${list} no ${many ? 'tienen' : 'tiene'} ${lack}.`,
+        lackZ: 'altimetría',
+        lackZDem: 'altimetría, y el modelo del terreno no ha podido facilitarla',
+        lackT: 'tiempo',
+        noLine: 'No se ha encontrado ninguna línea (LineString) en el archivo.',
+        importFailed: 'Importación fallida: '
+      }
+    };
+    let ui = UI.en;
+
     // --- Shared alert : elevation (Z) and missing time ---
     let infoCache = [], importedInfo = null;
-    const phrase = (labels, lack) => {
-      const pl = labels.length > 1;
-      return `${pl ? 'Les tracés' : 'Le tracé'} « ${labels.join(' », « ')} » ${pl ? "n'ont" : "n'a"} pas ${lack}.`;
-    };
+    const phrase = (labels, lack) => ui.phrase(`"${labels.join('", "')}"`, labels.length > 1, lack);
     const timeActive = () => {
       const tt = document.querySelector('#tooltipItems input[value=time]');
       const hd = document.querySelector('#headerItems input[value=duration]');
@@ -232,15 +363,15 @@
       const all = infoCache.concat(importedInfo ? [importedInfo] : []);
       // Avec le MNT actif, l'absence de Z dans le fichier n'est plus un manque : elle est
       // comblée. On n'annonce donc que les tracés dont le remplissage a ÉCHOUÉ (demFailed),
-      // et non tous ceux qui n'ont pas de Z d'origine — un tracé pas encore affiché n'a
+      // et non tous ceux qui n'ont pas de Z d'origine, un tracé pas encore affiché n'a
       // même pas été tenté.
       const noZ = all.filter((x) => !x.hasZ && !demActive()).map((x) => x.label);
       const failed = demActive() ? all.filter((x) => x.demFailed).map((x) => x.label) : [];
       const noT = timeActive() ? all.filter((x) => !x.hasTime).map((x) => x.label) : [];
       const parts = [];
-      if (noZ.length) parts.push(phrase(noZ, "d'altimétrie"));
-      if (failed.length) parts.push(phrase(failed, "d'altimétrie, et le modèle de terrain n'a pas pu la fournir"));
-      if (noT.length) parts.push(phrase(noT, "de temps"));
+      if (noZ.length) parts.push(phrase(noZ, ui.lackZ));
+      if (failed.length) parts.push(phrase(failed, ui.lackZDem));
+      if (noT.length) parts.push(phrase(noT, ui.lackT));
       const box = document.getElementById('alert'), msg = document.getElementById('alert-msg');
       if (parts.length) { msg.innerHTML = parts.join('<br>'); box.style.display = 'block'; }
       else box.style.display = 'none';
@@ -267,19 +398,23 @@
       return fmt.readFeatures(isGeo ? JSON.parse(text) : text, opts);
     };
     const importEl = document.getElementById('importFile');
+    const importName = document.getElementById('importName');
+    let pickedFile = null;
+    document.getElementById('importBtn').onclick = () => importEl.click();
     if (importEl) importEl.addEventListener('change', (e) => {
       const file = e.target.files && e.target.files[0]; if (!file) return;
+      pickedFile = file.name; importName.textContent = pickedFile;
       const reader = new FileReader();
       reader.onload = () => {
         try {
           const f = pickLine(readByFormat(String(reader.result), file.name));
-          if (!f) { alert('Aucune ligne (LineString) trouvée dans le fichier.'); return; }
+          if (!f) { alert(ui.noLine); return; }
           vectorSource.clear(); vectorSource.addFeatures([f]);
           profile.setFeature(f);
           map.getView().fit(f.getGeometry().getExtent(), { padding: [70, 60, 230, 280], duration: 400 });
           importedInfo = { label: file.name, hasZ: Profile.featureHasZ(f), hasTime: Profile.featureHasTime(f) };
           updateAlert();
-        } catch (err) { alert('Import impossible : ' + err.message); }
+        } catch (err) { alert(ui.importFailed + err.message); }
       };
       reader.readAsText(file);
     });
@@ -305,15 +440,55 @@
     // --- Controls ---
     const bindSelect = (id, key) => { document.getElementById(id).onchange = function () { profile.setOptions({ [key]: this.value }); }; };
     bindSelect('theme', 'theme'); bindSelect('position', 'position'); bindSelect('units', 'units'); bindSelect('show', 'show');
+    document.getElementById('lang').onchange = function () {
+      profile.setOptions({ lang: this.value });   // the panel the library draws
+      applyLang(this.value);                      // the page around it
+    };
+
+    // The library takes `lang` for its own panel; the demo around it is a page like any
+    // other, so one select drives both: a half-translated screen would be worse than
+    // either language alone. Whatever the script writes itself is redrawn afterwards,
+    // no data-i18n covering it.
+    function applyLang(code) {
+      ui = UI[code] || UI.en;
+      document.documentElement.lang = UI[code] ? code : 'en';
+      document.querySelectorAll('[data-i18n]').forEach((el) => {
+        const t = ui[el.dataset.i18n]; if (t) el.textContent = t;
+      });
+      document.querySelectorAll('[data-i18n-title]').forEach((el) => {
+        const t = ui[el.dataset.i18nTitle]; if (!t) return;
+        el.title = t; if (el.hasAttribute('aria-label')) el.setAttribute('aria-label', t);
+      });
+      refreshDynamic();
+      updateAlert();
+    }
+    // Values the markup does not hold: they are recomputed rather than translated in place.
+    function refreshDynamic() {
+      const sm = document.getElementById('smoothing');
+      document.getElementById('smoothing_v').textContent = +sm.value === 0 ? ui.off : `${sm.value} m`;
+      importName.textContent = pickedFile || ui.noFile;
+    }
+
+    // These two do not go through bindSelect: a <select> only ever yields strings, and both
+    // options want a number - 'auto' excepted, which is the one string verticalScale takes.
+    const levelsEl = document.getElementById('zoomLevels');
+    levelsEl.onchange = function () { profile.setOptions({ zoomLevels: +this.value }); };
+    document.getElementById('verticalScale').onchange = function () {
+      profile.setOptions({ verticalScale: this.value === 'auto' ? 'auto' : +this.value });
+    };
 
     const bindRange = (id, key, fmt) => {
       const el = document.getElementById(id), out = document.getElementById(`${id}_v`);
-      el.oninput = function () { const v = +this.value; out.textContent = fmt ? fmt(v) : v; profile.setOptions({ [key]: v }); };
+      el.oninput = function () {
+        const v = +this.value; out.textContent = fmt ? fmt(v) : v;
+        out.removeAttribute('data-i18n');        // it now shows a value, not a word
+        profile.setOptions({ [key]: v });
+      };
     };
     bindRange('width', 'width'); bindRange('height', 'height');
     bindRange('xTicks', 'xTicks'); bindRange('yTicks', 'yTicks');
     bindRange('slopeClassSize', 'slopeClassSize', (v) => `${v}%`);
-    bindRange('smoothing', 'smoothing', (v) => v === 0 ? 'off' : `${v} m`);
+    bindRange('smoothing', 'smoothing', (v) => v === 0 ? ui.off : `${v} m`);
 
     // DEM: only applies to tracks without elevation. The alert follows the outcome -
     // filled means nothing is missing any more, failed is the only case worth reporting.
@@ -351,7 +526,7 @@
     document.getElementById('widthAuto').onclick = () => {
       profile.setOptions({ width: 'auto' });
       const mw = Math.round(map.getTargetElement().clientWidth);
-      widthEl.value = mw; widthV.textContent = `${mw} (auto)`;
+      widthEl.value = mw; widthV.textContent = `${mw} ${ui.autoSuffix}`;
     };
 
     document.getElementById('color').oninput = function () { profile.setColor(this.value); };
@@ -361,8 +536,16 @@
     const op = document.getElementById('opacity'), opv = document.getElementById('opacity_v');
     op.oninput = function () { const v = +this.value; opv.textContent = `${v}%`; profile.setOptions({ transparency: v >= 100 ? false : v / 100 }); };
 
+    // A setting that only refines a feature stays disabled while that feature is off:
+    // nesting depth means nothing without the A/B buttons, class size nothing without slope.
+    const flagDeps = { zoom: levelsEl, slope: document.getElementById('slopeClassSize') };
+
     document.querySelectorAll('[data-flag]').forEach((btn) => {
-      btn.onclick = () => { const on = !btn.classList.contains('on'); btn.classList.toggle('on', on); profile.setOptions({ [btn.dataset.flag]: on }); };
+      btn.onclick = () => {
+        const on = !btn.classList.contains('on'); btn.classList.toggle('on', on);
+        profile.setOptions({ [btn.dataset.flag]: on });
+        const dep = flagDeps[btn.dataset.flag]; if (dep) dep.disabled = !on;
+      };
     });
 
     const bindChecks = (containerId, key) => {
@@ -378,6 +561,8 @@
     document.getElementById('titleLink').onchange = function () { profile.setOptions({ titleLink: this.checked ? 'link' : null }); };
 
     // --- Settings panel (hideable, folded by default on mobile devices) ---
+    applyLang(document.getElementById('lang').value);
+
     const panel = document.getElementById('panel');
     if (isMobile()) panel.classList.add('hidden');
     document.getElementById('gear').onclick = () => panel.classList.toggle('hidden');

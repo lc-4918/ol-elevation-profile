@@ -21,7 +21,7 @@ const profile = new OlElevationProfile({
   units: 'meters',                  // 'meters' | 'imperial'
   dataProjection: null,             // null = view projection | 'EPSG:4326' | Projection
   maxPoints: 2000,                  // render/interaction decimation (0 = none)
-  smoothing: 0,                     // elevation smoothing window, in metres
+  smoothing: 0,                     // elevation smoothing window, in meters
   dem: 'terrarium',                 // terrain model filling a track with no Z; null = off
                                     //   'terrarium' | 'ign' | (lonlats) => number[]
                                     //   | { url: '.../{z}/{x}/{y}.png', encoding: 'terrarium' }
@@ -38,6 +38,7 @@ const profile = new OlElevationProfile({
   grid: true,
   xTicks: null,                     // null = auto | number
   yTicks: null,                     // null = auto | number
+  verticalScale: 'auto',            // 'auto' = fills the height | number = metres per centimetre
 
   // Slope
   slope: false,
@@ -56,6 +57,7 @@ const profile = new OlElevationProfile({
   collapsed: false,
   exportPng: false,                 // toolbar button saving the panel as a PNG
   zoom: false,                      // A/B crop buttons
+  zoomLevels: 3,                    // nested crops allowed (1 = single level)
   ignoreStops: true,                // moving time (ignore stops)
   stopSpeed: 0.5,                   // m/s stop threshold
 
@@ -64,15 +66,8 @@ const profile = new OlElevationProfile({
   headerItems: ['distance', 'ascent', 'descent', 'minmax'], // + 'min','max','duration' or {property,...}
   titleProperty: 'name',
   titleLink: null,                  // feature property holding a URL
-  labels: {
-    distance: 'Distance', elevation: 'Altitude', slope: 'Pente',
-    ascent: 'D+', descent: 'D-', empty: 'Cliquez un tracé',
-    time: 'Temps', duration: 'Durée',
-    durationUnits: { s: 'sec', m: 'min', h: 'h', d: 'j' },
-    zoomStart: 'Définir le début (A)', zoomEnd: 'Définir la fin (B)', zoomAll: 'Tout voir',
-    exportPng: 'Exporter en PNG',
-    loading: 'Chargement du profil altimétrique'
-  }
+  lang: 'en',                       // 'en' | 'fr' | 'es'
+  labels: {}                        // per-key overrides, applied on top of lang
 })
 map.addControl(profile)
 ```
@@ -103,8 +98,46 @@ new OlElevationProfile({ color: 'auto', trackLayer: vectorLayer })
 
 ```js
 const p = new OlElevationProfile({ zoom: true })
-// Click A, click a point on the chart, click B, click another point:
-// the map and the profile crop to A..B (A reset to 0). "Show all" or zoom out to exit.
+// Click A, then a point on the chart: B arms itself, so the next click on the chart
+// places it. The map and the profile crop to A..B (A reset to 0).
+// "Show all" or zoom out to exit.
+```
+
+### Nested crops
+
+A crop can itself be cropped, which is how you reach a col inside a stage inside a long
+route. `zoomLevels` sets how deep, `1` restoring the former single level.
+
+```js
+const p = new OlElevationProfile({ zoom: true, zoomLevels: 3 })
+// A/B again inside a crop: it nests instead of replacing.
+// "Back" (from the second level) undoes one crop; "Show all" empties the stack.
+// Zooming the map out leaves the innermost level only, not the whole stack.
+```
+
+## Comparable vertical scale
+
+`'auto'` fills the height, so the same 2 % ramp looks flat on one track and steep on the
+next. A number fixes the metres per physical centimetre, and two profiles become
+comparable.
+
+```js
+const p = new OlElevationProfile({ verticalScale: 50 })   // 50 m per centimetre
+// The value is a floor: a track too steep to fit widens the scale rather than
+// spilling out of the frame. Nothing on the chart announces the scale.
+p.setOptions({ verticalScale: 'auto' })                   // back to filling the height
+```
+
+## Language
+
+English by default; French and Spanish ship with the library, and `labels` covers anything else.
+
+```js
+new OlElevationProfile({ lang: 'es' })
+profile.setOptions({ lang: 'fr' })                    // switches everything, buttons included
+
+// A key you would rather word yourself: it survives a later language change.
+new OlElevationProfile({ lang: 'fr', labels: { empty: 'Choisissez un itinéraire' } })
 ```
 
 ## Detect tracks without elevation

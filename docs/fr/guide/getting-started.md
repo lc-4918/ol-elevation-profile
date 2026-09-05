@@ -4,7 +4,7 @@
 
 ## Compatibilité
 
-OpenLayers **6 → 10.9.0** · d3 **≥ 7**.
+OpenLayers **6 à 10.9.0** · d3 **≥ 7**.
 
 ## Installation
 

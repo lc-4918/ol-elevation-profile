@@ -17,13 +17,13 @@ hero:
 features:
   - title: Lit le Z dans la géométrie
     details: Distance, D+/D- et min/max calculés directement depuis votre tracé 3D. Un tracé sans Z se complète depuis des tuiles de terrain sans clé, actif par défaut.
-  - title: Synchro carte ↔ profil
+  - title: Synchro carte et profil
     details: Survolez la carte ou le profil, un indicateur reste synchronisé sur les deux.
   - title: Classes de pente
     details: Coloration du profil par classes de pente, du bleu (plat) au rouge (raide), avec légende.
   - title: Responsive & mobile
     details: Barre pleine largeur sur mobile, huit ancrages sur desktop.
-  - title: Zoom A↔B
+  - title: Zoom A/B
     details: Recadre la carte et le profil sur un sous-intervalle, A remis à 0.
   - title: Thématisable
     details: Six thèmes intégrés, couleurs personnalisées, transparence, couleur de la trace.

@@ -114,6 +114,197 @@ p._exitZoom();
 check('leaving the crop -> total distance', Math.abs(p.getStats().distance - full) < 1e-6);
 check('A button comes back', p._btnA.style.display === '');
 
+// Placing A arms B on its own: no trip back to the toolbar between the two clicks.
+p._arm('A');
+check('arming A marks its button', p._btnA.classList.contains('armed'));
+p._placeBound(full * 0.30);
+check('A placed', Math.abs(p._zoomA - full * 0.30) < 1e-6);
+check('B arms itself right after A', p._armed === 'B' && p._btnB.classList.contains('armed'));
+check('no crop yet, B is still missing', p._cropDepth === 0);
+p._placeBound(full * 0.70);
+check('the second click crops', p._cropDepth === 1);
+check('nothing stays armed once both are placed', p._armed === null);
+check('the bounds are consumed', p._zoomA === null && p._zoomB === null);
+p._exitZoom();
+
+// Same the other way round: starting with B arms A.
+p._arm('B'); p._placeBound(full * 0.80);
+check('starting with B arms A', p._armed === 'A');
+p._placeBound(full * 0.20);
+check('order does not matter, the crop happens', p._cropDepth === 1);
+p._exitZoom();
+
+// A click with nothing armed places nothing.
+p._placeBound(full * 0.5);
+check('a click places nothing while nothing is armed',
+  p._zoomA === null && p._zoomB === null && p._cropDepth === 0);
+
+// --- nested crops ---------------------------------------------------------
+// A denser track: a crop of a crop needs samples left to cut.
+const denseCoords = [];
+for (let i = 0; i < 200; i++) denseCoords.push([i, i, 100 + 40 * Math.sin(i / 6)]);
+const denseGeom = { getType: () => 'LineString', getCoordinates: () => denseCoords,
+  getClosestPoint: () => denseCoords[0], getExtent: () => [0, 0, 199, 199] };
+const denseFeat = { getGeometry: () => denseGeom, get: () => null, getProperties: () => ({}), getStyle: () => null };
+
+const pn = new Profile({ zoom: true, dem: null });
+pn.setMap(map); pn.setFeature(denseFeat);
+const N0 = pn.getStats().distance;
+check('nested: starts at depth 0', pn._cropDepth === 0 && pn._off === 0);
+
+pn._pushCrop(0.25 * N0, 0.50 * N0);
+const N1 = pn.getStats().distance;
+check('nested: first level pushed', pn._cropDepth === 1);
+check('nested: origin is the crop start', Math.abs(pn._off - 0.25 * N0) < N0 * 0.02);
+check('nested: first level length', Math.abs(N1 - 0.25 * N0) < N0 * 0.02);
+check('nested: at depth 1 only "show all" is offered',
+  pn._btnAll.style.display === '' && pn._btnBack.style.display === 'none');
+
+// Bounds are read in the CURRENT level's frame and rebased on the whole track:
+// without that, each level would be read in the previous one's frame.
+pn._pushCrop(0.20 * N1, 0.60 * N1);
+const N2 = pn.getStats().distance;
+check('nested: second level pushed', pn._cropDepth === 2);
+check('nested: origins add up, no compounding',
+  Math.abs(pn._off - (0.25 * N0 + 0.20 * N1)) < N0 * 0.02);
+check('nested: second level length', Math.abs(N2 - 0.40 * N1) < N1 * 0.05);
+check('nested: "back" appears from depth 2', pn._btnBack.style.display === '');
+
+pn._pushCrop(0.10 * N2, 0.90 * N2);
+check('nested: third level pushed', pn._cropDepth === 3);
+check('nested: A/B hidden at the cap', pn._btnA.style.display === 'none');
+pn._pushCrop(0.10 * pn.getStats().distance, 0.90 * pn.getStats().distance);
+check('nested: a fourth crop is refused', pn._cropDepth === 3);
+
+// A recompute (an option changed, elevations arrived from the DEM) replays the stack:
+// without it the panel would show the whole track while the buttons claim a crop.
+pn.setOptions({ theme: 'dark' });
+check('nested: an option change keeps the crop', pn._cropDepth === 3
+  && Math.abs(pn.getStats().distance - pn._samples[pn._samples.length - 1].x) < 1e-6
+  && pn.getStats().distance < N0 * 0.9);
+
+pn._popCrop();
+check('nested: back returns to the level before', pn._cropDepth === 2
+  && Math.abs(pn.getStats().distance - N2) < 1e-6);
+pn._exitZoom();
+check('nested: "show all" empties the stack', pn._cropDepth === 0
+  && Math.abs(pn.getStats().distance - N0) < 1e-6);
+
+// zoomLevels: 1 must behave exactly like the former single level.
+const p1 = new Profile({ zoom: true, dem: null, zoomLevels: 1 });
+p1.setMap(map); p1.setFeature(denseFeat);
+p1._pushCrop(0.2 * p1.getStats().distance, 0.8 * p1.getStats().distance);
+check('zoomLevels 1: one level only', p1._cropDepth === 1 && p1._cropMax === 1);
+check('zoomLevels 1: a way out is offered', p1._btnAll.style.display === '');
+check('zoomLevels 1: no "back" button', p1._btnBack.style.display === 'none');
+
+// --- absolute vertical scale ----------------------------------------------
+// jsdom measures nothing, so _pxPerCm falls back to the nominal 96/2.54 px/cm.
+const pv = new Profile({ dem: null, verticalScale: 50, height: 200 });
+pv.setMap(map); pv.setFeature(denseFeat);
+const cm = pv._dims.innerH / pv._pxPerCm();
+const dom0 = pv._y.domain();
+check('vertical scale: metres per centimetre honoured',
+  Math.abs((dom0[1] - dom0[0]) / cm - 50) < 0.5);
+// Nothing is drawn on the chart to announce the scale; _vScale is the only way to know it.
+check('vertical scale: effective value published',
+  pv._vScale != null && Math.abs(pv._vScale - 50) < 0.5);
+
+// A track too steep for the asked scale: the floor gives way rather than overflow.
+const steep = [];
+for (let i = 0; i < 200; i++) steep.push([i, i, 100 + i * 12]);
+const steepGeom = { getType: () => 'LineString', getCoordinates: () => steep,
+  getClosestPoint: () => steep[0], getExtent: () => [0, 0, 199, 199] };
+pv.setFeature({ getGeometry: () => steepGeom, get: () => null, getProperties: () => ({}), getStyle: () => null });
+const domS = pv._y.domain(), st = pv.getStats();
+check('vertical scale: a steep track still fits in the frame',
+  domS[0] <= st.min && domS[1] >= st.max);
+check('vertical scale: the floor gave way', pv._vScale > 50);
+
+pv.setOptions({ verticalScale: 'auto' });
+check('vertical scale: auto publishes nothing', pv._vScale === null);
+
+// --- show: click vs mouseover ----------------------------------------------
+// The map listeners are subscribed once, at setMap. Reading the option there froze it, so
+// setOptions({ show: 'mouseover' }) changed nothing and hovering stayed dead.
+const handlers = {};
+const map2 = Object.assign({}, map, {
+  on: (type, fn) => { (handlers[type] = handlers[type] || []).push(fn); return {}; },
+  forEachFeatureAtPixel: (px, cb) => (px[0] === 1 ? cb(feature) : undefined)
+});
+const fire = (type, px) => (handlers[type] || []).forEach((fn) => fn({ pixel: px, coordinate: [0, 0] }));
+
+const pShow = new Profile({ dem: null, show: 'click', followMap: false });
+pShow.setMap(map2);
+fire('pointermove', [1, 1]);
+check('show click: hovering selects nothing', pShow._feature === null);
+fire('click', [1, 1]);
+check('show click: the click selects', pShow._feature === feature);
+
+pShow.clear();
+pShow.setOptions({ show: 'mouseover' });
+fire('pointermove', [1, 1]);
+check('show mouseover: switched at runtime, hovering selects', pShow._feature === feature);
+fire('click', [9, 9]);
+check('hideOnMapClick: a click on the empty map hides it', pShow._feature === null);
+
+pShow.setOptions({ show: 'click', hideOnMapClick: false });
+fire('click', [1, 1]);
+fire('click', [9, 9]);
+check('hideOnMapClick: turned off at runtime, the profile stays', pShow._feature === feature);
+
+// --- languages -------------------------------------------------------------
+const pEn = new Profile({ zoom: true, exportPng: true, dem: null });
+check('lang: English by default', pEn.options.labels.empty === 'Click a track'
+  && pEn._titleEl.textContent === 'Click a track');
+check('lang: the toolbar speaks it too', pEn._btnA.title === 'Set start (A)'
+  && pEn._btnA.getAttribute('aria-label') === 'Set start (A)');
+
+const pFr = new Profile({ lang: 'fr', zoom: true, dem: null });
+check('lang: fr', pFr.options.labels.empty === 'Cliquez un tracé'
+  && pFr._btnAll.title === 'Tout voir');
+const pEs = new Profile({ lang: 'es', zoom: true, dem: null });
+check('lang: es', pEs.options.labels.empty === 'Haga clic en una traza'
+  && pEs._btnB.title === 'Definir el final (B)');
+check('lang: an unknown code falls back to English',
+  new Profile({ lang: 'de' }).options.labels.empty === 'Click a track');
+
+// Every set carries every key: a partial one would mix two languages on screen.
+const labelKeys = Object.keys(pEn.options.labels);
+check('lang: no set has a hole', ['fr', 'es'].every((lg) => {
+  const l = new Profile({ lang: lg }).options.labels;
+  return labelKeys.every((k) => l[k] != null) && Object.keys(l).length === labelKeys.length;
+}));
+// The collapse button says what the click will do, and the tooltip matches the a11y name.
+check('lang: the collapse button carries a visible title',
+  pEn._toggleBtn.title === 'Collapse the profile'
+  && pEn._toggleBtn.getAttribute('aria-label') === 'Collapse the profile');
+pEn.toggleCollapsed(true);
+check('lang: collapsed, it offers to expand', pEn._toggleBtn.title === 'Expand the profile');
+pEn.toggleCollapsed(false);
+check('lang: expanded again, it offers to collapse', pEn._toggleBtn.title === 'Collapse the profile');
+check('lang: es toggles are translated too', pEs._toggleBtn.title === 'Contraer el perfil');
+
+check('lang: duration units belong to the set',
+  pEs.options.labels.durationUnits.s === 'seg' && pFr.options.labels.durationUnits.d === 'j');
+
+// Switching rebuilds from the new set, and refreshes what a render does not rewrite.
+pFr.setOptions({ lang: 'es' });
+check('lang: setOptions switches the set', pFr.options.labels.empty === 'Haga clic en una traza');
+check('lang: the buttons follow', pFr._btnAll.title === 'Ver todo');
+check('lang: nothing of the previous one is left',
+  pFr.options.labels.zoomBack === 'Volver al nivel anterior');
+
+// An override outlives the language it was set alongside.
+const pOv = new Profile({ lang: 'fr', zoom: true, dem: null, labels: { zoomAll: 'Tout le tracé' } });
+check('lang: an override wins over the set', pOv._btnAll.title === 'Tout le tracé');
+pOv.setOptions({ lang: 'en' });
+check('lang: the override survives the switch', pOv.options.labels.zoomAll === 'Tout le tracé'
+  && pOv._btnAll.title === 'Tout le tracé');
+check('lang: the rest did switch', pOv.options.labels.zoomStart === 'Set start (A)');
+pOv.setOptions({ labels: { zoomAll: 'Everything' } });
+check('lang: a later override replaces the earlier one', pOv._btnAll.title === 'Everything');
+
 // mobile
 Object.defineProperty(dom.window, 'innerWidth', { value: 360, configurable: true });
 p.setOptions({ position: 'top-right' });   // triggers a render
@@ -166,13 +357,58 @@ const pPoly = new Profile({});
 pPoly.setMap(map); pPoly.setFeature(mkFeat(mkGeom('Polygon', [ring], (c) => c)));
 const cp = pPoly._closestOnProfile(inside);
 check('polygon: hover snaps to the outline, not the surface', cp[0] !== inside[0] || cp[1] !== inside[1]);
-check('polygon: snapped point is a ring vertex', ring.some((r) => r[0] === cp[0] && r[1] === cp[1]));
+// On the outline anywhere, not only on its corners: the cursor slides along the ring.
+const onRing = (pt) => ring.some((a, i) => {
+  const b = ring[i + 1]; if (!b) return false;
+  const abx = b[0] - a[0], aby = b[1] - a[1], len2 = abx * abx + aby * aby;
+  const r = ((pt[0] - a[0]) * abx + (pt[1] - a[1]) * aby) / len2;
+  if (r < -1e-9 || r > 1 + 1e-9) return false;
+  return Math.hypot(a[0] + abx * r - pt[0], a[1] + aby * r - pt[1]) < 1e-9;
+});
+check('polygon: the snapped point lies on the outline', onRing(cp));
+check('polygon: it is no longer forced onto a vertex',
+  !ring.some((r) => r[0] === cp[0] && r[1] === cp[1]));
 
 // Lines keep the geometry's own answer, which is exact rather than limited to the samples.
 const pLine = new Profile({});
 pLine.setMap(map); pLine.setFeature(mkFeat(mkGeom('LineString', [[0,0,10],[2,2,20]], () => [1.234, 1.234])));
 const cpl = pLine._closestOnProfile([9, 9]);
 check('line: hover still uses the geometry', cpl[0] === 1.234);
+
+// --- continuous hover ------------------------------------------------------
+// Snapping to the nearest sample walked the cursor from vertex to vertex; between two
+// samples the position is interpolated, on the chart as on the map.
+const pHov = new Profile({ dem: null });
+pHov.setMap(map); pHov.setFeature(feature);
+const seg = pHov._samples[1].x;                 // length of the first segment
+
+const mid = pHov._sampleAt(seg / 2);
+check('hover: between two samples the point is interpolated',
+  Math.abs(mid.z - 20) < 1e-6 && Math.abs(mid.coord[0] - 0.5) < 1e-6
+  && Math.abs(mid.x - seg / 2) < 1e-6);
+
+const hA = pHov._sampleAt(seg * 0.25), hB = pHov._sampleAt(seg * 0.26);
+check('hover: two close positions no longer collapse onto one vertex',
+  hA.x !== hB.x && hA.z !== hB.z);
+check('hover: the slope is that of the segment, not an interpolation',
+  mid.slope === pHov._samples[1].slope);
+check('hover: the elapsed time follows',
+  mid.t != null && Math.abs(mid.t - (pHov._samples[0].t + pHov._samples[1].t) / 2) < 1e-6);
+check('hover: outside the profile is clamped to its ends',
+  pHov._sampleAt(-1e9).x === pHov._samples[0].x
+  && pHov._sampleAt(1e9).x === pHov._samples[pHov._samples.length - 1].x);
+
+// From the map the coordinate is projected onto the segment, not snapped to a vertex.
+// Capture only: _setFocus measures the label with getBBox, which jsdom does not implement.
+let seen = null;
+const realFocus = pHov._setFocus;
+pHov._setFocus = (d) => { seen = d; };
+pHov._focusByCoord([0.5, 0.5]);
+check('hover from the map: projected onto the segment', seen && Math.abs(seen.z - 20) < 1e-6);
+pHov._focusByCoord([0.6, 0.4]);                 // beside the track, same spot once projected
+check('hover from the map: a point off the track projects onto it',
+  seen && Math.abs(seen.coord[0] - 0.5) < 1e-6 && Math.abs(seen.coord[1] - 0.5) < 1e-6);
+pHov._setFocus = realFocus;
 
 
 // ---- DEM loading spinner ----------------------------------------------------

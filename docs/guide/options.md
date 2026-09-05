@@ -69,7 +69,24 @@ Source-specific keys:
 
 A fill is **all or nothing**: one unresolved point abandons it, and the profile stays as it would have been without. The `demload` event reports the outcome, `{ ok, zoom, tiles }`, with `zoom: null` and `tiles: 0` for a source that is not tiled. See [Terrain model](/guide/features#terrain-model).
 
-**`smoothing`**: elevation smoothing as a sliding-window average over a distance in **metres** (`0` = none). Being metric, it is independent of GPS point density and softens both the profile and the slope. Default: `0`.
+**`smoothing`**: elevation smoothing. Each point's elevation is replaced by the average of the elevations found within **half the window on either side, along the track**. The value is a distance in **metres of track**, not a number of points: `smoothing: 100` averages over 100 m whether the recording holds a point every second or every ten metres. Default: `0` (raw elevations).
+
+Why bother: a recorded elevation wobbles by a few metres from one point to the next, barometer or satellites alike. Drawn as they come, those wobbles turn a flat road into a hairy line, and each of them counts as a climb followed by a descent, so **D+ inflates**: a flat outing can report hundreds of metres of ascent it never had. Slope suffers the same way, swinging between absurd values over a few metres of track.
+
+What it costs: smoothing lowers D+ and shaves genuine short features. A window wide enough to erase the noise also rounds off a col: 200 m of track through a pass takes a metre or two off its summit. There is no neutral value, only a trade you make knowingly.
+
+It applies to the **samples**, not to the drawing: `getStats()`, D+/D-, min/max and the slope classes all follow it. The geometry on the map is untouched: only the elevations read from it, and the terrain-model fill is smoothed like any other source.
+
+| Value | What it is for |
+|---|---|
+| `0` | Raw. Every measurement kept, noise included |
+| `20`-`50` | Tames ordinary GPS jitter, leaves the relief where it is |
+| `100`-`200` | A legible silhouette for a long route, at the price of the small features |
+| beyond | You are reshaping the terrain rather than reading it |
+
+```js
+new OlElevationProfile({ smoothing: 60 })   // average over ±30 m of track
+```
 
 ## Appearance
 
@@ -89,6 +106,14 @@ A fill is **all or nothing**: one unresolved point abandons it, and the profile 
 
 **`yTicks`**: number of Y-axis ticks; `null` lets the library choose from the height. Default: `null`.
 
+**`verticalScale`**: `'auto'` makes the profile fill the height, which is legible, but the scale changes from one track to the next, so a 2 % ramp looks like a wall and two profiles cannot be compared. A **number** fixes the metres covered per physical centimetre, measured on the screen rather than deduced from the nominal 96 dpi, so it follows browser zoom. Default: `'auto'`.
+
+The number is a **floor, not a cage**: a track whose range exceeds what the height can show would spill out of the frame, which is worse than losing comparability. The scale then widens to contain it, silently: nothing is drawn on the chart to announce the scale, which is a property of the display rather than of the track. The value actually applied is read back from `_vScale`, `null` in `'auto'`.
+
+```js
+new OlElevationProfile({ verticalScale: 50 })   // 50 m per centimetre
+```
+
 ## Slope
 
 **`slope`**: when `true`, the profile is split into contiguous portions coloured by slope class. Default: `false`.
@@ -97,7 +122,7 @@ A fill is **all or nothing**: one unresolved point abandons it, and the profile 
 
 **`maxClasses`**: maximum number of slope classes (colours + legend). Steeper slopes fold into the last class, shown as `≥ X %`. Default: `8`.
 
-**`slopeColors`**: `null` uses the built-in blue→red ramp (cyan/green, pure yellow in the middle). Otherwise an array of CSS colours, interpolated across the classes present. Default: `null`.
+**`slopeColors`**: `null` uses the built-in blue-to-red ramp (cyan/green, pure yellow in the middle). Otherwise an array of CSS colours, interpolated across the classes present. Default: `null`.
 
 **`slopeSeparators`**: draw a vertical separator at each slope-class change. Default: `true`.
 
@@ -121,6 +146,12 @@ A fill is **all or nothing**: one unresolved point abandons it, and the profile 
 
 **`zoom`**: show the A/B crop buttons, which crop both map and profile to a sub-range (A reset to 0). Default: `false`.
 
+Placing one bound **arms the other**: click A, click the chart, click the chart again, the second bound needs no trip back to the toolbar. Either button can start the pair, and the order in which A and B are placed does not matter.
+
+**`zoomLevels`**: how many crops may be **nested**: a crop can itself be cropped, down to this depth. Set `1` for a single level, the behaviour before this option existed. Default: `3`.
+
+A **back** button appears from the second level and undoes one crop; **show all** empties the stack whatever the depth. Zooming the map out beyond a level's own extent leaves that level only, instead of dropping the whole stack. Bounds are held in the abscissa of the *whole* track, never in the frame of the level they were picked in, so nesting adds no drift.
+
 **`ignoreStops`**: when computing time, exclude stopped segments so the duration is **moving time**. `false` gives raw wall-clock time. Default: `true`.
 
 **`stopSpeed`**: speed threshold in **m/s** (≈ 1.8 km/h) below which a segment counts as a stop. Default: `0.5`.
@@ -135,18 +166,37 @@ A fill is **all or nothing**: one unresolved point abandons it, and the profile 
 
 **`titleLink`**: a feature property holding a URL; when present, the title becomes a clickable link. Default: `null`.
 
-**`labels`**: all user-facing strings, overridable individually. Keys and defaults: `distance` `'Distance'`, `elevation` `'Altitude'`, `slope` `'Pente'`, `ascent` `'D+'`, `descent` `'D-'`, `empty` `'Cliquez un tracé'` (placeholder title), `time` `'Temps'`, `duration` `'Durée'`, `durationUnits` `{ s:'sec', m:'min', h:'h', d:'j' }` (time unit abbreviations), `zoomStart` `'Définir le début (A)'`, `zoomEnd` `'Définir la fin (B)'`, `zoomAll` `'Tout voir'`, `exportPng` `'Exporter en PNG'` (export button), `loading` `'Chargement du profil altimétrique'` (accessible name of the terrain-model spinner).
+**`lang`**: language of the shipped labels: `'en'` (default), `'fr'`, `'es'`. An unknown code falls back to English rather than leaving keys empty. Each set is complete: a partial translation would put two languages in the same panel.
+
+::: warning Coming from 1.x
+The labels used to be French, with no way to ask for another language. English is now the default, add `lang: 'fr'` to keep the panel exactly as it was.
+:::
 
 ```js
-// Example: English labels
+new OlElevationProfile({ lang: 'es' })
+profile.setOptions({ lang: 'fr' })     // switches every label, buttons included
+```
+
+**`labels`**: per-key overrides applied on top of `lang`, for a wording you would rather choose yourself or a language that is not shipped. Only the keys you pass change. They **survive a language change**: a corrected key stays corrected, the rest follows the new set. Default: `{}`.
+
+Keys, with their English values: `distance` `'Distance'`, `elevation` `'Elevation'`, `slope` `'Slope'`, `ascent` `'D+'`, `descent` `'D-'` (map notation, the same in every language), `empty` `'Click a track'` (placeholder title), `time` `'Time'`, `duration` `'Duration'`, `durationUnits` `{ s:'sec', m:'min', h:'h', d:'d' }` (time unit abbreviations), `zoomStart` `'Set start (A)'`, `zoomEnd` `'Set end (B)'`, `zoomAll` `'Show all'`, `zoomBack` `'Back one level'` (back one nested crop), `exportPng` `'Export as PNG'` (export button), `collapse` `'Collapse the profile'` and `expand` `'Expand the profile'` (the collapse button, whichever the click will do), `loading` `'Loading the elevation profile'` (accessible name of the terrain-model spinner).
+
+```js
+// Italian, say: a language that is not shipped
 new OlElevationProfile({
   labels: {
-    elevation: 'Elevation', slope: 'Slope', empty: 'Click a track',
-    duration: 'Duration', durationUnits: { s: 'sec', m: 'min', h: 'h', d: 'd' },
-    zoomStart: 'Set start (A)', zoomEnd: 'Set end (B)', zoomAll: 'Show all',
-    exportPng: 'Export as PNG', loading: 'Loading the elevation profile'
+    elevation: 'Altitudine', slope: 'Pendenza', empty: 'Clicca un percorso',
+    duration: 'Durata', durationUnits: { s: 'sec', m: 'min', h: 'h', d: 'g' },
+    zoomStart: 'Imposta inizio (A)', zoomEnd: 'Imposta fine (B)', zoomAll: 'Mostra tutto',
+    zoomBack: 'Torna al livello precedente',
+    exportPng: 'Esporta in PNG',
+    collapse: 'Riduci il profilo', expand: 'Espandi il profilo',
+    loading: 'Caricamento del profilo altimetrico'
   }
 })
+
+// Or one word on top of a shipped language
+new OlElevationProfile({ lang: 'fr', labels: { empty: 'Choisissez un itinéraire' } })
 ```
 
 ## Full constructor (every option)
@@ -183,6 +233,7 @@ const profile = new OlElevationProfile({
   grid: true,
   xTicks: null,                     // null = auto | number
   yTicks: null,                     // null = auto | number
+  verticalScale: 'auto',            // 'auto' = fills the height | number = metres per centimetre
 
   // Slope
   slope: false,
@@ -201,6 +252,7 @@ const profile = new OlElevationProfile({
   collapsed: false,
   exportPng: false,                 // toolbar button saving the panel as a PNG
   zoom: false,                      // A/B crop buttons
+  zoomLevels: 3,                    // nested crops allowed (1 = single level)
   ignoreStops: true,                // moving time (ignore stops)
   stopSpeed: 0.5,                   // m/s stop threshold
 
@@ -209,22 +261,15 @@ const profile = new OlElevationProfile({
   headerItems: ['distance', 'ascent', 'descent', 'minmax'], // + 'min','max','duration' or {property,...}
   titleProperty: 'name',
   titleLink: null,                  // feature property holding a URL
-  labels: {
-    distance: 'Distance', elevation: 'Altitude', slope: 'Pente',
-    ascent: 'D+', descent: 'D-', empty: 'Cliquez un tracé',
-    time: 'Temps', duration: 'Durée',
-    durationUnits: { s: 'sec', m: 'min', h: 'h', d: 'j' },
-    zoomStart: 'Définir le début (A)', zoomEnd: 'Définir la fin (B)', zoomAll: 'Tout voir',
-    exportPng: 'Exporter en PNG',
-    loading: 'Chargement du profil altimétrique'
-  }
+  lang: 'en',                       // 'en' | 'fr' | 'es'
+  labels: {}                        // per-key overrides, applied on top of lang
 })
 map.addControl(profile)
 ```
 
 ## Methods
 
-**`setFeature(feature)`**: show the profile for an OpenLayers feature, ideally 3D: `LineString`, `MultiLineString`, or a `Polygon` / `MultiPolygon`, profiled along its **outer ring** (holes are ignored; the profile returns to its starting point, so D+ equals D−, see [Geometry types](/guide/features#geometry-types)). A falsy value hides the control. Returns `this`.
+**`setFeature(feature)`**: show the profile for an OpenLayers feature, ideally 3D: `LineString`, `MultiLineString`, or a `Polygon` / `MultiPolygon`, profiled along its **outer ring** (holes are ignored; the profile returns to its starting point, so D+ equals D-, see [Geometry types](/guide/features#geometry-types)). A falsy value hides the control. Returns `this`.
 
 ```js
 const f = new ol.format.GeoJSON().readFeatures(geojson, {

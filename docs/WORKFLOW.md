@@ -1,4 +1,4 @@
-# Workflow CI/CD — ol-elevation-profile
+# Workflow CI/CD : ol-elevation-profile
 
 Ce document explique comment la bibliothèque est vérifiée, publiée sur
 [npmjs](https://www.npmjs.com/package/ol-elevation-profile) et distribuée en GitHub Release.
@@ -14,12 +14,12 @@ Deux workflows cohabitent dans [`.github/workflows/`](../.github/workflows/) :
 
 `build-release.yml` a deux comportements distincts selon ce qui est poussé :
 
-- **Un push sur une branche** → `npm test` + `npm run build`, le `dist/` produit reste
+- **Un push sur une branche** : `npm test` + `npm run build`, le `dist/` produit reste
   disponible en **artifact** de l'exécution.
-- **Un push d'un tag `vX.Y.Z`** → publication du paquet sur **npmjs** (avec provenance),
+- **Un push d'un tag `vX.Y.Z`** : publication du paquet sur **npmjs** (avec provenance),
   puis création d'une **GitHub Release** portant le tarball publié et les bundles.
 
-npmjs reste le canal principal — c'est lui qu'interrogent `npm install`, unpkg et jsDelivr.
+npmjs reste le canal principal : c'est lui qu'interrogent `npm install`, unpkg et jsDelivr.
 La GitHub Release en est le double : elle fige le tarball exact qui a été publié et donne
 les notes de version.
 
@@ -30,16 +30,16 @@ les notes de version.
 **Ce qu'il fait :**
 1. Checkout du code.
 2. Setup Node.js 24, cache npm.
-3. `npm ci` — installation stricte depuis `package-lock.json`.
-4. `npm run build` — rollup produit ESM + UMD + minifié, puis la CSS est copiée.
-5. `npm test` — le smoke test jsdom de [`test/smoke.cjs`](../test/smoke.cjs).
+3. `npm ci` : installation stricte depuis `package-lock.json`.
+4. `npm run build` : rollup produit ESM + UMD + minifié, puis la CSS est copiée.
+5. `npm test` : le smoke test jsdom de [`test/smoke.cjs`](../test/smoke.cjs).
 6. Upload de `dist/` comme **artifact** de l'exécution.
 
-L'ordre build → test n'est pas interchangeable : le smoke test charge le bundle produit
+L'ordre build puis test n'est pas interchangeable : le smoke test charge le bundle produit
 dans `dist/`, pas les sources.
 
-**Où trouver le build :** onglet **Actions** → l'exécution du commit → section **Artifacts**
-→ `ol-elevation-profile-dist-<sha>.zip`.
+**Où trouver le build :** onglet **Actions**, l'exécution du commit, section **Artifacts**,
+`ol-elevation-profile-dist-<sha>.zip`.
 
 **Utilité :** vérifier qu'une branche compile et passe les tests avant de la merger, et
 récupérer un bundle utilisable sans publier de version.
@@ -48,7 +48,7 @@ récupérer un bundle utilisable sans publier de version.
 
 **Déclenchement :** push d'un tag Git au format `vX.Y.Z` (ex. `v0.7.0`).
 
-**Prérequis :** dans **Settings → Secrets and variables → Actions** du dépôt :
+**Prérequis :** dans **Settings > Secrets and variables > Actions** du dépôt :
 
 | Secret | Contenu | Obligatoire |
 |---|---|---|
@@ -65,11 +65,11 @@ déclenche la 2FA, que la CI ne peut pas satisfaire.
 
 **Processus complet :**
 1. Checkout complet (`fetch-depth: 0`) au commit du tag.
-2. Setup Node.js 24 avec `registry-url` npmjs — c'est cette option qui écrit le `.npmrc`
+2. Setup Node.js 24 avec `registry-url` npmjs : c'est cette option qui écrit le `.npmrc`
    d'authentification que `npm publish` lira.
 3. **Vérification du contrat de version** (voir [section 5](#5-le-contrat-de-version)).
 4. `npm ci`, `npm run build`, `npm test`.
-5. `npm pack` — le tarball exact destiné à npmjs, mis de côté.
+5. `npm pack` : le tarball exact destiné à npmjs, mis de côté.
 6. `npm publish --provenance` sur npmjs.
 7. Création de la **GitHub Release** portant le nom du tag, avec notes générées
    automatiquement, le tarball et les quatre fichiers de `dist/` en pièces jointes.
@@ -84,7 +84,7 @@ Release ne vient annoncer une version absente du registre.
 ## 4. Comment publier une version
 
 1. Préparer le code : commits finaux mergés sur `main`, build vert sur la branche.
-2. Bumper la version — `npm version` écrit `package.json`, `package-lock.json`, crée le
+2. Bumper la version : `npm version` écrit `package.json`, `package-lock.json`, crée le
    commit **et** le tag `vX.Y.Z` d'un coup :
    ```bash
    npm version minor        # ou patch / major / 0.7.0
@@ -114,7 +114,7 @@ d'accord, et l'étape *Check version contract* le vérifie avant tout travail :
 
 La seconde vérification mérite une insistance : **une version publiée sur npm est
 définitive.** `npm unpublish` n'est autorisé que dans les 72 heures et interdit ensuite de
-réutiliser ce numéro. Il n'y a pas de reprise possible — la seule sortie est de passer à la
+réutiliser ce numéro. Il n'y a pas de reprise possible : la seule sortie est de passer à la
 version suivante.
 
 Si l'étape échoue, rien n'a été publié : corriger `package.json`, supprimer le tag fautif
@@ -122,9 +122,9 @@ Si l'étape échoue, rien n'a été publié : corriger `package.json`, supprimer
 
 ## 6. Provenance npm
 
-`npm publish --provenance` signe le paquet via l'OIDC de l'exécution — d'où la permission
-`id-token: write` sur le job. npmjs affiche alors le badge **« Built and signed on GitHub
-Actions »** et publie une attestation Sigstore liant le tarball à ce dépôt et à ce commit.
+`npm publish --provenance` signe le paquet via l'OIDC de l'exécution, d'où la permission
+`id-token: write` sur le job. npmjs affiche alors le badge **"Built and signed on GitHub
+Actions"** et publie une attestation Sigstore liant le tarball à ce dépôt et à ce commit.
 
 Conséquences pratiques :
 
@@ -138,7 +138,7 @@ Conséquences pratiques :
 
 `deploy.yml` est indépendant du cycle de release : il se déclenche à chaque push sur `main`
 et republie le site VitePress, la démo et une copie de `dist/` sur GitHub Pages. Une
-correction de documentation est donc en ligne sans qu'il faille taguer quoi que ce soit —
+correction de documentation est donc en ligne sans qu'il faille taguer quoi que ce soit ;
 et, symétriquement, une release ne rafraîchit le site que si elle s'accompagne d'un commit
 sur `main` (ce que fait `npm version`).
 

@@ -9,13 +9,13 @@
 
 A synchronized, themeable **elevation profile control for [OpenLayers](https://openlayers.org/)**, rendered with [d3](https://d3js.org/).
 
-It reads elevation (**Z**) directly from a track's geometry (`[lon, lat, z]` GPX/GeoJSON) — distance, ascent/descent and min/max are computed from the track itself, with no service involved. A track that carries **no** Z is filled from keyless [terrain tiles](#terrain-model), which is on by default; `dem: null` turns it off. Clicking (or hovering) a track shows its profile; a marker stays synchronized on both the map and the chart, and a click on the empty map hides it. The control is fully responsive (full-width docked bar on phones), supports slope-class colouring, metric smoothing, an A↔B crop, six themes, transparency, and a track-colour mode.
+It reads elevation (**Z**) directly from a track's geometry (`[lon, lat, z]` GPX/GeoJSON): distance, ascent/descent and min/max are computed from the track itself, with no service involved. A track that carries **no** Z is filled from keyless [terrain tiles](#terrain-model), which is on by default; `dem: null` turns it off. Clicking (or hovering) a track shows its profile; a marker stays synchronized on both the map and the chart, and a click on the empty map hides it. The control is fully responsive (full-width docked bar on phones), supports slope-class colouring, metric smoothing, an A/B crop, six themes, transparency, and a track-colour mode.
 
 ## Screenshots
 
 ![Elevation profile coloured by slope class](./assets/screenshot-profile.png)
 
-> Animated demos (hover sync, A↔B crop, slope colouring) are best seen live — see the [demo](#demo). GIFs can be added under `assets/`.
+> Animated demos (hover sync, A/B crop, slope colouring) are best seen live, see the [demo](#demo). GIFs can be added under `assets/`.
 
 ## Installation
 
@@ -68,7 +68,7 @@ vectorSource.addFeatures(feats)
 profile.setFeature(feats[0])  // or let a click on the track select it
 ```
 
-Any OpenLayers-readable format works (GeoJSON, GPX, KML, …) — the control only consumes OL `Feature`s. Read GPX/KML with `ol.format.GPX` / `ol.format.KML` and pass the line feature to `setFeature`.
+Any OpenLayers-readable format works (GeoJSON, GPX, KML, and so on): the control only consumes OL `Feature`s. Read GPX/KML with `ol.format.GPX` / `ol.format.KML` and pass the line feature to `setFeature`.
 
 Full option reference: see the [documentation](#documentation).
 
@@ -80,15 +80,31 @@ With `slope: true`, the profile is split into contiguous portions of the same sl
 
 ### Smoothing
 
-`smoothing` is a sliding-window average over **metres** of track (`0` = none, the default). Because the unit is metric, the result is independent of GPS point density; it softens both the profile and the slope.
+A recorded elevation wobbles by a few metres from one point to the next, and each wobble counts as a climb followed by a descent, so **D+ inflates**, sometimes by hundreds of metres on a flat outing. `smoothing` replaces each elevation by the average of those found within half the window on either side, **along the track**: a distance in metres, not a number of points, so the same value behaves the same whatever the recording density. It applies to the samples, so D+/D-, min/max and the slope classes follow. The price is symmetrical: a window wide enough to erase the noise also rounds off a col.
+
+### Languages
+
+Labels ship in **English** (default), **French** and **Spanish**: `lang: 'fr'` switches the whole panel, buttons and accessible names included, and `profile.setOptions({ lang: 'es' })` does it at runtime. An unknown code falls back to English rather than leaving keys empty. `labels` still overrides any key on top of the chosen language, which is how you reach a language that is not shipped, and an override survives a later language change.
+
+> **Coming from 1.x**: the shipped labels used to be French, with no way to ask for another language. English is now the default; add `lang: 'fr'` to keep the panel exactly as it was.
+
+### Vertical scale
+
+By default (`verticalScale: 'auto'`) the profile fills the height. That is legible, but the scale changes from one track to the next, so a 2 % ramp looks like a wall and two profiles cannot be compared. A **number** fixes the metres covered per physical centimetre, measured on screen rather than deduced from the nominal 96 dpi, so it follows the browser zoom.
+
+The value is a **floor, not a cage**: a track whose range exceeds what the height can show would spill out of the frame, which is worse than losing comparability. The scale then widens to contain it, silently: nothing is drawn on the chart to announce the scale, which is a property of the display rather than of the track.
+
+### Nested crops
+
+With `zoom: true`, the A/B buttons crop map and profile to a sub-range. Placing one bound arms the other, so the pair is picked in two clicks on the chart rather than four trips to the toolbar. A crop can then be cropped in turn, which is how you reach a col inside a stage of a long route, down to `zoomLevels` deep (default 3; `1` restores the former single level). A **back** button appears from the second level and undoes one crop, while **show all** empties the stack whatever the depth; zooming the map out past a level's extent leaves that level only. Bounds are kept in the whole track's abscissa, never in the frame of the level they were picked in, so nesting introduces no drift.
 
 ### Terrain model
 
-A track with **no Z** — drawn by hand, traced over a basemap, exported by a tool that drops the third dimension — would get no profile. The missing elevations are read from [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) instead, **by default**: PNG tiles carrying elevation in their R/G/B channels, **no API key, no quota, no rate limit**. A 10 000-point track costs a handful of tiles where a free elevation API would cost 100 requests. Pass `dem: null` to disable it and keep the control off the network.
+A track with **no Z** (drawn by hand, traced over a basemap, exported by a tool that drops the third dimension) would get no profile. The missing elevations are read from [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) instead, **by default**: PNG tiles carrying elevation in their R/G/B channels, **no API key, no quota, no rate limit**. A 10 000-point track costs a handful of tiles where a free elevation API would cost 100 requests. Pass `dem: null` to disable it and keep the control off the network.
 
-Elevation is interpolated bilinearly between the four surrounding pixels — reading the containing pixel would make the profile advance in stairs, and every stair counts as a climb then a descent in the D+. A track is filled **entirely or not at all**: a profile missing a few points dives to sea level and its D+ becomes absurd. Tracks that already carry their own Z are untouched.
+Elevation is interpolated bilinearly between the four surrounding pixels: reading the containing pixel would make the profile advance in stairs, and every stair counts as a climb then a descent in the D+. A track is filled **entirely or not at all**: a profile missing a few points dives to sea level and its D+ becomes absurd. Tracks that already carry their own Z are untouched.
 
-Accuracy is roughly 30–90 m depending on the region (mean 16 m from IGN's 1 m reference on steep alpine terrain). Any of these can be used instead:
+Accuracy is roughly 30 to 90 m depending on the region (mean 16 m from IGN's 1 m reference on steep alpine terrain). Any of these can be used instead:
 
 | `dem` | Source |
 |---|---|

@@ -10,7 +10,11 @@ new OlElevationProfile({ slope: true, slopeClassSize: 2.5, maxClasses: 8 })
 
 ## Lissage
 
-`smoothing` est une moyenne glissante sur des **mètres** de tracé (`0` = aucun). Comme l'unité est métrique, le résultat est indépendant de la densité de points GPS. Le lissage adoucit le profil **et** la pente.
+Une altitude enregistrée oscille de quelques mètres d'un point au suivant, baromètre ou satellites confondus. Dessinées telles quelles, ces oscillations transforment une route plate en ligne hérissée, et chacune compte pour une montée suivie d'une descente, si bien que le **D+ enfle** : une sortie plate peut annoncer des centaines de mètres de dénivelé qu'elle n'a jamais eus.
+
+`smoothing` remplace l'altitude de chaque point par la moyenne des altitudes rencontrées sur **une demi-fenêtre de part et d'autre, le long du tracé**. Étant une distance en mètres de tracé et non un nombre de points, la même valeur se comporte pareillement sur un enregistrement à un point par seconde et sur un export tous les dix mètres. Elle porte sur les échantillons : `getStats()`, le D+/D-, les min/max et les classes de pente la suivent tous ; la géométrie sur la carte n'est pas touchée.
+
+Le prix est symétrique : une fenêtre assez large pour effacer le bruit arrondit aussi un col. Comptez `20`-`50` pour dompter le tremblement ordinaire, `100`-`200` pour une silhouette lisible sur un long parcours ; au-delà, on remodèle le terrain plutôt qu'on ne le lit. Voir [`smoothing`](/fr/guide/options#unites-donnees) pour le compromis complet.
 
 ```js
 profile.setOptions({ smoothing: 60 }) // moyenne sur ±30 m
@@ -18,9 +22,13 @@ profile.setOptions({ smoothing: 60 }) // moyenne sur ±30 m
 
 ## Types de géométrie
 
-`LineString` et `MultiLineString` sont parcourus tels quels. Un `Polygon` ou un `MultiPolygon` est parcouru le long de son **anneau extérieur** ; les trous ne font pas partie du contour lui-même, ils sont donc ignorés. L'anneau étant fermé, le profil revient à son point de départ, si bien que le D+ et le D− sortent **égaux par construction**. Sur une boucle, c'est précisément ce qu'on grimpe en en faisant le tour. La distance est le périmètre, et tout le reste se comporte comme sur une ligne : min/max, coloration par pente, recadrage A↔B, remplissage depuis un MNT.
+`LineString` et `MultiLineString` sont parcourus tels quels. Un `Polygon` ou un `MultiPolygon` est parcouru le long de son **anneau extérieur** ; les trous ne font pas partie du contour lui-même, ils sont donc ignorés. L'anneau étant fermé, le profil revient à son point de départ, si bien que le D+ et le D- sortent **égaux par construction**. Sur une boucle, c'est précisément ce qu'on grimpe en en faisant le tour. La distance est le périmètre, et tout le reste se comporte comme sur une ligne : min/max, coloration par pente, recadrage A/B, remplissage depuis un MNT.
 
 Les polygones sont sélectionnables sur la carte comme les lignes. Le survol accroche le marqueur au **contour** et non à la surface : le `getClosestPoint` d'un polygone répond pour son intérieur, où le curseur est son propre point le plus proche.
+
+## Curseur
+
+Le curseur se déplace **en continu**, sur le profil comme sur la carte : entre deux échantillons, position, altitude et temps sont interpolés sur le segment, et une coordonnée de la carte y est projetée. Les échantillons sont les points *mesurés*, non les seules positions que le curseur ait le droit d'occuper : se caler sur le plus proche ferait avancer le marqueur de sommet en sommet, saut bien visible sur un tracé peu dense ou éclairci par `maxPoints`. La pente fait exception : propriété du segment, constante sur toute sa longueur, elle n'est pas interpolée.
 
 ## Modèle de terrain
 
@@ -106,7 +114,7 @@ Trois voies, et elles ne se valent pas.
 
 | Voie | Valeurs | Interpolées | Requêtes pour un tracé de 5 000 points |
 |---|---|---|---|
-| **WCS → `ol/source/GeoTIFF`** | exactes | oui | quelques requêtes Range |
+| **WCS via `ol/source/GeoTIFF`** | exactes | oui | quelques requêtes Range |
 | **Tuiles terrain-RGB pré-encodées** | quantifiées par l'encodage | oui | quelques tuiles |
 | **WMS `GetFeatureInfo`** | exactes | **non** | 5 000 |
 
@@ -213,7 +221,7 @@ new OlElevationProfile({ dem: 'ign' })
 new OlElevationProfile({ dem: { source: 'ign', apiKey: '...' } })
 ```
 
-Hors de sa couverture le service répond `-99999`, que le contrôle lit comme « pas de mesure », un tracé qui sort de France tombe donc sous la règle du tout ou rien et reste plat. Aucune frontière n'est codée ici : on demande, et le service dit lui-même où il ne sait pas.
+Hors de sa couverture le service répond `-99999`, que le contrôle lit comme "pas de mesure", un tracé qui sort de France tombe donc sous la règle du tout ou rien et reste plat. Aucune frontière n'est codée ici : on demande, et le service dit lui-même où il ne sait pas.
 
 ### Fournir les altitudes soi-même
 
@@ -277,7 +285,7 @@ Le panneau est reconstruit en SVG plutôt que capturé. L'entête est du HTML et
 
 ## Attributions
 
-Quand le profil occupe le coin bas-droite (ou le bas en pleine largeur), les attributions OpenLayers sont automatiquement remontées **au-dessus** du profil, alignées à droite, avec un écart vertical égal à l'écart bord-de-carte ↔ bas-du-profil. Les autres placements ne touchent pas aux attributions.
+Quand le profil occupe le coin bas-droite (ou le bas en pleine largeur), les attributions OpenLayers sont automatiquement remontées **au-dessus** du profil, alignées à droite, avec un écart vertical égal à celui qui sépare le bord de la carte du bas du profil. Les autres placements ne touchent pas aux attributions.
 
 ## Temps
 
@@ -286,7 +294,7 @@ Si le tracé source porte une donnée temporelle : `coordTimes` (horodatages ISO
 - ajoutez `'duration'` à `headerItems` pour afficher la **durée totale** dans la ligne de titre ;
 - ajoutez `'time'` à `tooltipItems` pour afficher le **temps écoulé au point** survolé.
 
-L'unité s'adapte à la valeur : `7 sec`, `26 min`, `1 h 48 min`, `2 j 3 h` (jours + heures). Par défaut le temps est le **temps en mouvement** : les segments à l'arrêt (vitesse sous `stopSpeed`, 0,5 m/s) sont exclus ; mettez `ignoreStops: false` pour le temps réel écoulé. Sous un recadrage A↔B, le temps est rebasé pour repartir de 0 à A. Utilisez `OlElevationProfile.featureHasTime(feature)` pour détecter si un tracé porte le temps.
+L'unité s'adapte à la valeur : `7 sec`, `26 min`, `1 h 48 min`, `2 j 3 h` (jours + heures). Par défaut le temps est le **temps en mouvement** : les segments à l'arrêt (vitesse sous `stopSpeed`, 0,5 m/s) sont exclus ; mettez `ignoreStops: false` pour le temps réel écoulé. Sous un recadrage A/B, le temps est rebasé pour repartir de 0 à A. Utilisez `OlElevationProfile.featureHasTime(feature)` pour détecter si un tracé porte le temps.
 
 ```js
 new OlElevationProfile({

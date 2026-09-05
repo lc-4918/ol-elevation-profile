@@ -38,6 +38,7 @@ const profile = new OlElevationProfile({
   grid: true,
   xTicks: null,                     // null = auto | nombre
   yTicks: null,                     // null = auto | nombre
+  verticalScale: 'auto',            // 'auto' = remplit la hauteur | nombre = mètres par centimètre
 
   // Pente
   slope: false,
@@ -56,6 +57,7 @@ const profile = new OlElevationProfile({
   collapsed: false,
   exportPng: false,                 // bouton d'export du panneau en PNG
   zoom: false,                      // boutons de recadrage A/B
+  zoomLevels: 3,                    // recadrages imbriqués autorisés (1 = niveau unique)
   ignoreStops: true,                // temps en mouvement (ignore les arrêts)
   stopSpeed: 0.5,                   // seuil d'arrêt en m/s
 
@@ -64,15 +66,8 @@ const profile = new OlElevationProfile({
   headerItems: ['distance', 'ascent', 'descent', 'minmax'], // + 'min','max','duration' ou {property,...}
   titleProperty: 'name',
   titleLink: null,                  // propriété contenant une URL
-  labels: {
-    distance: 'Distance', elevation: 'Altitude', slope: 'Pente',
-    ascent: 'D+', descent: 'D-', empty: 'Cliquez un tracé',
-    time: 'Temps', duration: 'Durée',
-    durationUnits: { s: 'sec', m: 'min', h: 'h', d: 'j' },
-    zoomStart: 'Définir le début (A)', zoomEnd: 'Définir la fin (B)', zoomAll: 'Tout voir',
-    exportPng: 'Exporter en PNG',
-    loading: 'Chargement du profil altimétrique'
-  }
+  lang: 'en',                       // 'en' | 'fr' | 'es'
+  labels: {}                        // surcharges clé à clé, par-dessus lang
 })
 map.addControl(profile)
 ```
@@ -103,8 +98,47 @@ new OlElevationProfile({ color: 'auto', trackLayer: vectorLayer })
 
 ```js
 const p = new OlElevationProfile({ zoom: true })
-// Clic A, clic sur un point du profil, clic B, clic sur un autre point :
-// la carte et le profil se recadrent sur A..B (A remis à 0). « Tout voir » ou dézoom pour sortir.
+// Clic A, puis clic sur un point du profil : B s'arme tout seul, le clic suivant
+// sur le profil le pose. La carte et le profil se recadrent sur A..B (A remis à 0).
+// "Tout voir" ou dézoom pour sortir.
+```
+
+### Recadrages imbriqués
+
+Un recadrage peut être recadré à son tour : c'est ainsi qu'on descend jusqu'à un col dans
+une étape d'un long parcours. `zoomLevels` en fixe la profondeur, `1` rendant le niveau
+unique d'autrefois.
+
+```js
+const p = new OlElevationProfile({ zoom: true, zoomLevels: 3 })
+// A/B de nouveau dans un recadrage : il s'imbrique au lieu de le remplacer.
+// "Retour" (dès le deuxième niveau) défait un cran ; "Tout voir" vide la pile.
+// Dézoomer la carte ne quitte que le niveau courant, pas toute la pile.
+```
+
+## Échelle verticale comparable
+
+En `'auto'`, le profil remplit la hauteur : la même pente de 2 % paraît plate sur une trace
+et raide sur la suivante. Un nombre fixe les mètres par centimètre physique, et deux profils
+deviennent comparables.
+
+```js
+const p = new OlElevationProfile({ verticalScale: 50 })   // 50 m par centimètre
+// La valeur est un plancher : une trace trop raide pour tenir élargit l'échelle plutôt
+// que de déborder du cadre. Aucune mention de l'échelle n'est portée sur le graphe.
+p.setOptions({ verticalScale: 'auto' })                   // retour au remplissage de la hauteur
+```
+
+## Langue
+
+L'anglais par défaut ; le français et l'espagnol sont livrés avec la librairie, et `labels` couvre tout le reste.
+
+```js
+new OlElevationProfile({ lang: 'fr' })
+profile.setOptions({ lang: 'es' })                    // bascule tout, boutons compris
+
+// Une clé qu'on préfère formuler soi-même : elle survit à un changement de langue.
+new OlElevationProfile({ lang: 'fr', labels: { empty: 'Choisissez un itinéraire' } })
 ```
 
 ## Détecter les tracés sans altitude

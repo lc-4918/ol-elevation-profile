@@ -22,7 +22,7 @@ Toutes les options se passent au constructeur et la plupart se modifient à l'ex
 
 **`units`** : système de mesure : `'meters'` (km / m) ou `'imperial'` (mi / ft). Défaut : `'meters'`.
 
-**`dataProjection`** : projection des coordonnées du feature. `null` signifie « projection de la vue » ; sinon un code comme `'EPSG:4326'` ou un `ol/proj/Projection`. Défaut : `null`.
+**`dataProjection`** : projection des coordonnées du feature. `null` signifie "projection de la vue" ; sinon un code comme `'EPSG:4326'` ou un `ol/proj/Projection`. Défaut : `null`.
 
 **`maxPoints`** : plafonne le nombre de points dessinés et utilisés pour l'interaction (la géométrie est décimée au-delà). Les statistiques utilisent toujours les données complètes. `0` désactive la décimation. Défaut : `2000`.
 
@@ -69,7 +69,24 @@ Clés propres à une source :
 
 Un remplissage est **tout ou rien** : un seul point non résolu l'abandonne, et le profil reste ce qu'il aurait été sans. L'événement `demload` en rend compte, `{ ok, zoom, tiles }`, avec `zoom: null` et `tiles: 0` pour une source non tuilée. Voir [Modèle de terrain](/fr/guide/fonctions#modele-de-terrain).
 
-**`smoothing`** : lissage de l'altitude par moyenne glissante sur une distance en **mètres** (`0` = aucun). Étant métrique, il est indépendant de la densité de points GPS et adoucit le profil comme la pente. Défaut : `0`.
+**`smoothing`** : lissage de l'altitude. L'altitude de chaque point est remplacée par la moyenne des altitudes rencontrées sur **une demi-fenêtre de part et d'autre, le long du tracé**. La valeur est une distance en **mètres de tracé**, non un nombre de points : `smoothing: 100` moyenne sur 100 m que l'enregistrement porte un point par seconde ou un point tous les dix mètres. Défaut : `0` (altitudes brutes).
+
+À quoi cela sert : une altitude enregistrée oscille de quelques mètres d'un point au suivant, baromètre ou satellites confondus. Dessinées telles quelles, ces oscillations transforment une route plate en ligne hérissée et chacune compte pour une montée suivie d'une descente, si bien que le **D+ enfle** : une sortie plate peut annoncer des centaines de mètres de dénivelé qu'elle n'a jamais eus. La pente en souffre pareillement, sautant d'une valeur absurde à l'autre sur quelques mètres.
+
+Ce que cela coûte : le lissage abaisse le D+ et rabote les accidents réels les plus courts. Une fenêtre assez large pour effacer le bruit arrondit aussi un col : 200 m de tracé à travers un passage lui ôtent un mètre ou deux de sommet. Il n'y a pas de valeur neutre, seulement un compromis qu'on choisit en connaissance de cause.
+
+Le lissage porte sur les **échantillons**, non sur le dessin : `getStats()`, le D+/D-, les min/max et les classes de pente le suivent tous. La géométrie sur la carte n'est pas touchée, seules les altitudes qu'on en lit le sont, et un remplissage depuis un MNT est lissé comme n'importe quelle autre source.
+
+| Valeur | À quoi elle sert |
+|---|---|
+| `0` | Brut. Toute mesure conservée, bruit compris |
+| `20`-`50` | Dompte le tremblement GPS ordinaire, laisse le relief où il est |
+| `100`-`200` | Une silhouette lisible pour un long parcours, au prix des petits accidents |
+| au-delà | On remodèle le terrain plutôt qu'on ne le lit |
+
+```js
+new OlElevationProfile({ smoothing: 60 })   // moyenne sur ±30 m de tracé
+```
 
 ## Apparence
 
@@ -89,6 +106,14 @@ Un remplissage est **tout ou rien** : un seul point non résolu l'abandonne, et 
 
 **`yTicks`** : nombre de graduations de l'axe Y ; `null` laisse la librairie choisir selon la hauteur. Défaut : `null`.
 
+**`verticalScale`** : en `'auto'`, le profil remplit la hauteur. C'est lisible, mais l'échelle change d'une trace à l'autre, si bien qu'une pente de 2 % y prend l'allure d'un mur et que deux profils ne se comparent pas. Un **nombre** fixe les mètres couverts par centimètre physique, mesuré à l'écran plutôt que déduit des 96 ppp nominaux, ce qui suit le zoom du navigateur. Défaut : `'auto'`.
+
+Ce nombre est un **plancher, non un carcan** : une trace dont l'amplitude dépasse ce que la hauteur peut montrer déborderait du cadre, ce qui est pire que de perdre la comparabilité. L'échelle s'élargit alors pour la contenir, sans rien en dire : aucune mention n'est portée sur le graphe, l'échelle étant une propriété de l'affichage et non de la trace. La valeur réellement appliquée est relisible dans `_vScale`, nul en `'auto'`.
+
+```js
+new OlElevationProfile({ verticalScale: 50 })   // 50 m par centimètre
+```
+
 ## Pente
 
 **`slope`** : si `true`, le profil est découpé en portions contiguës colorées par classe de pente. Défaut : `false`.
@@ -97,7 +122,7 @@ Un remplissage est **tout ou rien** : un seul point non résolu l'abandonne, et 
 
 **`maxClasses`** : nombre maximal de classes (couleurs + légende). Les pentes plus fortes se replient dans la dernière classe, affichée `≥ X %`. Défaut : `8`.
 
-**`slopeColors`** : `null` utilise la rampe intégrée bleu→rouge (cyan/vert, jaune pur au milieu). Sinon un tableau de couleurs CSS, interpolé sur les classes présentes. Défaut : `null`.
+**`slopeColors`** : `null` utilise la rampe intégrée du bleu au rouge (cyan/vert, jaune pur au milieu). Sinon un tableau de couleurs CSS, interpolé sur les classes présentes. Défaut : `null`.
 
 **`slopeSeparators`** : trace un séparateur vertical à chaque changement de classe. Défaut : `true`.
 
@@ -121,6 +146,12 @@ Un remplissage est **tout ou rien** : un seul point non résolu l'abandonne, et 
 
 **`zoom`** : affiche les boutons de recadrage A/B, qui recadrent carte et profil sur un sous-intervalle (A remis à 0). Défaut : `false`.
 
+Poser une borne **arme l'autre** : clic sur A, clic sur le profil, clic de nouveau sur le profil, la seconde borne n'exige aucun retour par la barre d'outils. L'un ou l'autre bouton peut ouvrir la paire, et l'ordre dans lequel A et B sont posés est indifférent.
+
+**`zoomLevels`** : nombre de recadrages **imbriqués** autorisés : un recadrage peut être recadré à son tour, jusqu'à cette profondeur. `1` rend le niveau unique, comportement d'avant cette option. Défaut : `3`.
+
+Un bouton **retour** paraît à partir du deuxième niveau et défait un recadrage ; **tout voir** vide la pile quelle que soit la profondeur. Dézoomer la carte au-delà de l'emprise d'un niveau ne quitte que ce niveau, au lieu de lâcher toute la pile. Les bornes sont gardées en abscisse de la trace **entière**, jamais dans le repère du niveau où elles ont été posées : l'imbrication n'introduit donc aucune dérive.
+
 **`ignoreStops`** : au calcul du temps, exclut les segments à l'arrêt pour que la durée soit le **temps en mouvement**. `false` donne le temps réel écoulé. Défaut : `true`.
 
 **`stopSpeed`** : seuil de vitesse en **m/s** (≈ 1,8 km/h) sous lequel un segment compte comme un arrêt. Défaut : `0.5`.
@@ -135,18 +166,37 @@ Un remplissage est **tout ou rien** : un seul point non résolu l'abandonne, et 
 
 **`titleLink`** : une propriété contenant une URL ; si présente, le titre devient un lien cliquable. Défaut : `null`.
 
-**`labels`** : tous les textes affichés, surchargeables individuellement. Clés et défauts : `distance` `'Distance'`, `elevation` `'Altitude'`, `slope` `'Pente'`, `ascent` `'D+'`, `descent` `'D-'`, `empty` `'Cliquez un tracé'` (titre par défaut), `time` `'Temps'`, `duration` `'Durée'`, `durationUnits` `{ s:'sec', m:'min', h:'h', d:'j' }` (abréviations d'unités), `zoomStart` `'Définir le début (A)'`, `zoomEnd` `'Définir la fin (B)'`, `zoomAll` `'Tout voir'`, `exportPng` `'Exporter en PNG'` (bouton d'export), `loading` `'Chargement du profil altimétrique'` (nom accessible du spinner de chargement du MNT).
+**`lang`** : langue des libellés livrés : `'en'` (défaut), `'fr'`, `'es'`. Un code inconnu retombe sur l'anglais plutôt que de laisser des clés vides. Chaque jeu est complet : une traduction à trous ferait cohabiter deux langues dans le même panneau.
+
+::: warning Depuis la 1.x
+Les libellés étaient français, sans moyen d'en demander d'autres. L'anglais est désormais le défaut, ajoutez `lang: 'fr'` pour retrouver le panneau tel qu'il était.
+:::
 
 ```js
-// Exemple : libellés anglais
+new OlElevationProfile({ lang: 'fr' })
+profile.setOptions({ lang: 'es' })     // bascule tous les libellés, boutons compris
+```
+
+**`labels`** : surcharges clé à clé, appliquées **par-dessus** `lang`, pour une formulation qu'on préfère choisir soi-même ou une langue non livrée. Seules les clés passées changent. Elles **survivent à un changement de langue** : une clé corrigée le reste, le reste suit le nouveau jeu. Défaut : `{}`.
+
+Les clés, avec leurs valeurs françaises (`lang: 'fr'`) : `distance` `'Distance'`, `elevation` `'Altitude'`, `slope` `'Pente'`, `ascent` `'D+'`, `descent` `'D-'` (notation des cartes, identique dans toutes les langues), `empty` `'Cliquez un tracé'` (titre par défaut), `time` `'Temps'`, `duration` `'Durée'`, `durationUnits` `{ s:'sec', m:'min', h:'h', d:'j' }` (abréviations d'unités), `zoomStart` `'Définir le début (A)'`, `zoomEnd` `'Définir la fin (B)'`, `zoomAll` `'Tout voir'`, `zoomBack` `'Revenir au niveau précédent'` (retour d'un niveau imbriqué), `exportPng` `'Exporter en PNG'` (bouton d'export), `collapse` `'Réduire le profil'` et `expand` `'Agrandir le profil'` (le bouton de repli, selon ce que le clic fera), `loading` `'Chargement du profil altimétrique'` (nom accessible du spinner de chargement du MNT).
+
+```js
+// L'italien, par exemple : une langue non livrée
 new OlElevationProfile({
   labels: {
-    elevation: 'Elevation', slope: 'Slope', empty: 'Click a track',
-    duration: 'Duration', durationUnits: { s: 'sec', m: 'min', h: 'h', d: 'd' },
-    zoomStart: 'Set start (A)', zoomEnd: 'Set end (B)', zoomAll: 'Show all',
-    exportPng: 'Export as PNG', loading: 'Loading the elevation profile'
+    elevation: 'Altitudine', slope: 'Pendenza', empty: 'Clicca un percorso',
+    duration: 'Durata', durationUnits: { s: 'sec', m: 'min', h: 'h', d: 'g' },
+    zoomStart: 'Imposta inizio (A)', zoomEnd: 'Imposta fine (B)', zoomAll: 'Mostra tutto',
+    zoomBack: 'Torna al livello precedente',
+    exportPng: 'Esporta in PNG',
+    collapse: 'Riduci il profilo', expand: 'Espandi il profilo',
+    loading: 'Caricamento del profilo altimetrico'
   }
 })
+
+// Ou un seul mot par-dessus une langue livrée
+new OlElevationProfile({ lang: 'fr', labels: { empty: 'Choisissez un itinéraire' } })
 ```
 
 ## Constructeur complet (toutes les options)
@@ -183,6 +233,7 @@ const profile = new OlElevationProfile({
   grid: true,
   xTicks: null,                     // null = auto | nombre
   yTicks: null,                     // null = auto | nombre
+  verticalScale: 'auto',            // 'auto' = remplit la hauteur | nombre = mètres par centimètre
 
   // Pente
   slope: false,
@@ -201,6 +252,7 @@ const profile = new OlElevationProfile({
   collapsed: false,
   exportPng: false,                 // bouton d'export du panneau en PNG
   zoom: false,                      // boutons de recadrage A/B
+  zoomLevels: 3,                    // recadrages imbriqués autorisés (1 = niveau unique)
   ignoreStops: true,                // temps en mouvement (ignore les arrêts)
   stopSpeed: 0.5,                   // seuil d'arrêt en m/s
 
@@ -209,22 +261,15 @@ const profile = new OlElevationProfile({
   headerItems: ['distance', 'ascent', 'descent', 'minmax'], // + 'min','max','duration' ou {property,...}
   titleProperty: 'name',
   titleLink: null,                  // propriété contenant une URL
-  labels: {
-    distance: 'Distance', elevation: 'Altitude', slope: 'Pente',
-    ascent: 'D+', descent: 'D-', empty: 'Cliquez un tracé',
-    time: 'Temps', duration: 'Durée',
-    durationUnits: { s: 'sec', m: 'min', h: 'h', d: 'j' },
-    zoomStart: 'Définir le début (A)', zoomEnd: 'Définir la fin (B)', zoomAll: 'Tout voir',
-    exportPng: 'Exporter en PNG',
-    loading: 'Chargement du profil altimétrique'
-  }
+  lang: 'en',                       // 'en' | 'fr' | 'es'
+  labels: {}                        // surcharges clé à clé, par-dessus lang
 })
 map.addControl(profile)
 ```
 
 ## Méthodes
 
-**`setFeature(feature)`** : affiche le profil pour un feature OpenLayers, idéalement 3D : `LineString`, `MultiLineString`, ou un `Polygon` / `MultiPolygon`, parcouru le long de son **anneau extérieur** (les trous sont ignorés ; le profil revient à son point de départ, donc le D+ égale le D−, voir [Types de géométrie](/fr/guide/fonctions#types-de-geometrie)). Une valeur fausse masque le contrôle. Renvoie `this`.
+**`setFeature(feature)`** : affiche le profil pour un feature OpenLayers (feature 2D ou 3D) : `LineString`, `MultiLineString`, ou un `Polygon` / `MultiPolygon`, parcouru le long de son **anneau extérieur** (les trous sont ignorés ; le profil revient à son point de départ, donc le D+ égale le D-, voir [Types de géométrie](/fr/guide/fonctions#types-de-geometrie)). Une valeur fausse masque le contrôle. Renvoie `this`.
 
 ```js
 const f = new ol.format.GeoJSON().readFeatures(geojson, {

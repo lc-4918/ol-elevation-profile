@@ -10,7 +10,11 @@ new OlElevationProfile({ slope: true, slopeClassSize: 2.5, maxClasses: 8 })
 
 ## Smoothing
 
-`smoothing` is a sliding-window average over **metres** of track (`0` = none). Because the unit is metric, the result is independent of GPS point density. Smoothing softens both the profile and the slope.
+A recorded elevation wobbles by a few metres from one point to the next, barometer or satellites alike. Drawn as they come, those wobbles turn a flat road into a hairy line, and each of them counts as a climb followed by a descent, so **D+ inflates**: a flat outing can report hundreds of metres of ascent it never had.
+
+`smoothing` replaces each point's elevation by the average of the elevations found within **half the window on either side, along the track**. Being a distance in metres of track rather than a number of points, the same value behaves the same on a one-point-per-second recording and on a ten-metre export. It applies to the samples, so `getStats()`, D+/D-, min/max and the slope classes all follow; the geometry on the map is untouched.
+
+The price is symmetrical: a window wide enough to erase the noise also rounds off a col. Expect `20`-`50` to tame ordinary jitter, `100`-`200` for a legible long-route silhouette, and beyond that you are reshaping the terrain rather than reading it. See [`smoothing`](/guide/options#units-data) for the full trade-off.
 
 ```js
 profile.setOptions({ smoothing: 60 }) // average over ±30 m
@@ -18,9 +22,13 @@ profile.setOptions({ smoothing: 60 }) // average over ±30 m
 
 ## Geometry types
 
-`LineString` and `MultiLineString` are profiled as they come. A `Polygon` or `MultiPolygon` is profiled along its **outer ring**; holes are not part of the outline itself, so they are ignored. The ring being closed, the profile returns to its starting point, so D+ and D− come out **equal by construction**. On a loop, that is exactly what one climbs going round it. Distance is the perimeter, and everything else behaves as on a line: min/max, slope colouring, A↔B crop, terrain-model fill.
+`LineString` and `MultiLineString` are profiled as they come. A `Polygon` or `MultiPolygon` is profiled along its **outer ring**; holes are not part of the outline itself, so they are ignored. The ring being closed, the profile returns to its starting point, so D+ and D- come out **equal by construction**. On a loop, that is exactly what one climbs going round it. Distance is the perimeter, and everything else behaves as on a line: min/max, slope colouring, A/B crop, terrain-model fill.
 
 Polygons are selectable on the map like lines. Hovering snaps the marker to the **outline**, not to the surface: a polygon's own `getClosestPoint` answers for its interior, where the cursor is its own closest point.
+
+## Cursor
+
+The cursor moves **continuously**, on the chart as on the map: between two samples, position, elevation and time are interpolated on the segment, and a map coordinate is projected onto it. Samples are the points that were measured, not the only places the cursor is allowed to stand: settling for the nearest one would walk the marker from vertex to vertex, a visible jump on a sparse track or one thinned by `maxPoints`. Slope is the exception: it is a property of the segment, constant along it, so it is not interpolated.
 
 ## Terrain model
 
@@ -106,7 +114,7 @@ Three routes, and they are not equivalent.
 
 | Route | Values | Interpolated | Requests for a 5 000-point track |
 |---|---|---|---|
-| **WCS → `ol/source/GeoTIFF`** | exact | yes | a handful of range requests |
+| **WCS via `ol/source/GeoTIFF`** | exact | yes | a handful of range requests |
 | **Pre-encoded terrain-RGB tiles** | quantised by the encoding | yes | a handful of tiles |
 | **WMS `GetFeatureInfo`** | exact | **no** | 5 000 |
 
@@ -286,7 +294,7 @@ If the source track carries time data: `coordTimes` (ISO timestamps, from GPX `<
 - add `'duration'` to `headerItems` to show the **total elapsed time** in the title line;
 - add `'time'` to `tooltipItems` to show the **elapsed time at the cursor** point.
 
-The unit adapts to the value: `7 sec`, `26 min`, `1 h 48 min`, `2 j 3 h` (days + hours). By default the time is **moving time**: stopped segments (speed below `stopSpeed`, 0.5 m/s) are excluded; set `ignoreStops: false` for raw wall-clock time. Under an A↔B crop, the time is rebased so it restarts at 0 on A. Use `OlElevationProfile.featureHasTime(feature)` to detect whether a track has time data.
+The unit adapts to the value: `7 sec`, `26 min`, `1 h 48 min`, `2 j 3 h` (days + hours). By default the time is **moving time**: stopped segments (speed below `stopSpeed`, 0.5 m/s) are excluded; set `ignoreStops: false` for raw wall-clock time. Under an A/B crop, the time is rebased so it restarts at 0 on A. Use `OlElevationProfile.featureHasTime(feature)` to detect whether a track has time data.
 
 ```js
 new OlElevationProfile({
