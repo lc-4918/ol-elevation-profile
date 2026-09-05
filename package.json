@@ -1,6 +1,6 @@
 {
   "name": "ol-elevation-profile",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "description": "Synchronized elevation profile control for OpenLayers, rendered with d3. Reads elevation from 3D GPX/GeoJSON, or fills it from a terrain model: AWS tiles, IGN RGE ALTI, XYZ, WMS, GeoTIFF, GeoServer, or your own source.",
   "type": "module",
   "main": "dist/ol-elevation-profile.js",
