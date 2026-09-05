@@ -4,15 +4,15 @@
 
 ## Compatibilité
 
-OpenLayers **6 à 10.9.0** · d3 **≥ 7**.
+OpenLayers **6 à 10.10.0** · d3 **≥ 7**.
 
 ## Installation
 
 ### Balises script (UMD)
 
 ```html
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@10.9.0/ol.css">
-<script src="https://cdn.jsdelivr.net/npm/ol@10.9.0/dist/ol.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@10.10.0/ol.css">
+<script src="https://cdn.jsdelivr.net/npm/ol@10.10.0/dist/ol.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
 
 <link rel="stylesheet" href="ol-elevation-profile.css">

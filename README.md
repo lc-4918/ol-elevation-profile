@@ -2,7 +2,7 @@
 
 <p>
   <a href="https://www.npmjs.com/package/ol-elevation-profile"><img src="https://img.shields.io/npm/v/ol-elevation-profile.svg" alt="npm version"></a>
-  <a href="https://openlayers.org/"><img src="https://img.shields.io/badge/OpenLayers-6%20%E2%80%93%2010.9.0-1f6feb.svg" alt="OpenLayers 6 to 10.9.0"></a>
+  <a href="https://openlayers.org/"><img src="https://img.shields.io/badge/OpenLayers-6%20to%2010.10.0-1f6feb.svg" alt="OpenLayers 6 to 10.10.0"></a>
   <a href="https://d3js.org/"><img src="https://img.shields.io/badge/d3-%E2%89%A5%207-f9a03c.svg" alt="d3 >= 7"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License: MIT"></a>
 </p>
@@ -24,8 +24,8 @@ It reads elevation (**Z**) directly from a track's geometry (`[lon, lat, z]` GPX
 The control expects `ol` and `d3` to be present as globals (provided by your map page):
 
 ```html
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@10.9.0/ol.css">
-<script src="https://cdn.jsdelivr.net/npm/ol@10.9.0/dist/ol.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@10.10.0/ol.css">
+<script src="https://cdn.jsdelivr.net/npm/ol@10.10.0/dist/ol.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
 
 <link rel="stylesheet" href="ol-elevation-profile.css">
