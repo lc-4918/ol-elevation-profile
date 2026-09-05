@@ -28,6 +28,7 @@ const profile = new OlElevationProfile({
                                     //   | { wms: { url, layers } }
                                     //   | { olSource }        // TileImage or GeoTIFF
                                     //   | { featureInfo: { url, layers, property } }
+                                    //   | { track: { url: '/profils/{id}.json' } }
 
   // Appearance
   theme: 'steelblue',               // steelblue | lime | purple | slate | graphite | amber | {area,line,axis,text,focus}
@@ -39,6 +40,7 @@ const profile = new OlElevationProfile({
   xTicks: null,                     // null = auto | number
   yTicks: null,                     // null = auto | number
   verticalScale: 'auto',            // 'auto' = fills the height | number = metres per centimetre
+                                    //   | { exaggeration: 6 } = fixed vertical/horizontal ratio
 
   // Slope
   slope: false,
@@ -51,6 +53,7 @@ const profile = new OlElevationProfile({
   // Behaviour
   show: 'click',                    // 'click' | 'mouseover'
   hideOnMapClick: true,
+  showWithoutElevation: true,       // no Z by any route: panel + message
   followMap: true,
   marker: true,
   collapsable: true,
@@ -64,8 +67,8 @@ const profile = new OlElevationProfile({
   // Content
   tooltipItems: ['distance', 'elevation'],                  // + 'slope', 'time'
   headerItems: ['distance', 'ascent', 'descent', 'minmax'], // + 'min','max','duration' or {property,...}
-  titleProperty: 'name',
-  titleLink: null,                  // feature property holding a URL
+  titleProperty: 'name',            // or a list, tried in order
+  titleLink: null,                  // a name, or a list: the first real URL wins
   lang: 'en',                       // 'en' | 'fr' | 'es'
   labels: {}                        // per-key overrides, applied on top of lang
 })
@@ -128,6 +131,82 @@ const p = new OlElevationProfile({ verticalScale: 50 })   // 50 m per centimetre
 p.setOptions({ verticalScale: 'auto' })                   // back to filling the height
 ```
 
+## Comparable slopes: a held ratio, a scale recomputed per track
+
+A fixed number makes **ranges** comparable, not slopes: the horizontal axis stretches over
+the whole track, so the same 5 % ramp is drawn three times steeper on a 3 km loop than on a
+30 km traverse. An exaggeration **holds** the ratio between the axes instead, and it is the metres per
+centimetre that the control recomputes for every track it is given. The number is the
+invariant, which is why it is a number and not `'auto'`: there would be nothing left to
+hold. `verticalScale: 'auto'` already is the case where the ratio drifts freely.
+
+| `verticalScale` | held | varies | comparable across tracks |
+|---|---|---|---|
+| `'auto'` | the height, filled | scale **and** ratio | nothing |
+| `50` | 50 m/cm | the ratio | **ranges** |
+| `{ exaggeration: 6 }` | the ratio, x6 | the scale | **slopes** |
+
+The ratio each mode actually produces, on the same four tracks:
+
+| `verticalScale` | 2.5 km | 10.3 km | 23.4 km | 123 km |
+|---|---|---|---|---|
+| `'auto'` | x3.18 | x10.73 | x7.66 | x12.84 |
+| `50` | x1.73 | x7.14 | x8.80 | x15.61 |
+| `{ exaggeration: 6 }` | x3.58 | x6.00 | x6.00 | x6.00 |
+
+Under the first two, a 5 % ramp is drawn four to nine times flatter on one track than on
+another, and the eye has no way of knowing. Only the third line holds — where the floor
+lets it.
+
+
+**Set it once, at construction. There is nothing to recompute per track:**
+
+```js
+const profile = new OlElevationProfile({ verticalScale: { exaggeration: 6 } })
+map.addControl(profile)
+
+profile.setFeature(shortLoop)      // 2.5 km  -> the scale narrows
+profile.setFeature(longTraverse)   // 123 km  -> the scale widens, the ratio holds
+```
+
+An application that computes a number itself has to redo it on every selection, and it
+still gets it wrong on a crop:
+
+```js
+// Don't: this is what { exaggeration } already does, minus the cases it gets right
+profile.setOptions({ verticalScale: metresPerCm(track.km) })   // on every click
+```
+
+What the same `{ exaggeration: 6 }` produces on a 1160x300 panel, without a single call
+from the application:
+
+| track | metres per centimetre | obtained |
+|---|---|---|
+| 2.5 km, 150 m of range | 24.2 | x3.58 |
+| 10.3 km | 59.5 | x6.00 |
+| 23.4 km | 135.2 | x6.00 |
+| 123.2 km, 1800 m of range | 711.7 | x6.00 |
+
+The scale spans a factor of thirty; the ratio holds. Two things the application could not
+have done from outside: the chart width is only known once the margins and the panel's own
+layout are resolved, and an A/B crop changes the displayed distance without changing the
+track.
+
+The first row is the **floor** at work: 150 m of range in 6.6 cm of height needs at least
+24.2 m/cm, where x6 would ask for 14.5. Rather than spill out of the frame, the scale
+widens and the ratio drops. Nothing on the chart says so, the scale being a property of the
+display rather than of the track — read it back instead:
+
+```js
+profile._vScale           // metres per centimetre actually applied; null under 'auto',
+                          //   which requests no absolute scale
+profile._vExaggeration    // ratio actually obtained, in every mode: below 6 whenever the
+                          //   floor has played, and drifting per track under 'auto'
+```
+
+Pick the factor from the terrain rather than from taste: 4 to 6 suits rolling country, 8 to
+10 makes a gentle greenway legible, 2 to 3 keeps high mountains from looking like a saw.
+
 ## Language
 
 English by default; French and Spanish ship with the library, and `labels` covers anything else.
@@ -140,11 +219,22 @@ profile.setOptions({ lang: 'fr' })                    // switches everything, bu
 new OlElevationProfile({ lang: 'fr', labels: { empty: 'Choisissez un itinéraire' } })
 ```
 
-## Detect tracks without elevation
+## Tracks without elevation
+
+The control handles the case itself: a track that ends up with no Z by any route shows the
+panel with its title and a message where the chart would be, rather than a flat line at zero.
+
+```js
+new OlElevationProfile({ showWithoutElevation: true })              // the default
+new OlElevationProfile({ showWithoutElevation: false })             // hide the panel instead
+new OlElevationProfile({ labels: { noElevation: 'Survey pending' } })
+```
+
+`featureHasZ` is still there to decide something else — a badge in a list, a filter:
 
 ```js
 if (!OlElevationProfile.featureHasZ(feature)) {
-  // warn the user this track has no altimetry
+  // this track carries no altimetry of its own
 }
 ```
 
@@ -198,7 +288,18 @@ new OlElevationProfile({
                         property: 'GRAY_INDEX' }, concurrency: 8 }
 });
 
-// 10. Anything else: you fetch the elevations, the control keeps the policy
+// 10. A profile your application computed beforehand, served per track. The only
+//     source that answers with the WHOLE track: `[[lon,lat,z],…]` replaces the
+//     geometry, so a profile decimated at ingestion is accepted as it is.
+new OlElevationProfile({
+  dem: { track: { url: '/profils/{id}.json' } }          // {id} read off the feature
+});
+new OlElevationProfile({
+  dem: { track: { url: (f) => `/api/tracks/${f.getId()}/profile`,
+                  parse: (json) => json.elevation.points } }
+});
+
+// 11. Anything else: you fetch the elevations, the control keeps the policy
 new OlElevationProfile({
   dem: async (lonlats) => {
     const r = await fetch('/api/elevations', { method: 'POST', body: JSON.stringify(lonlats) });

@@ -1,0 +1,17 @@
+{
+  "// ": "Declarations are not hand-written: they are extracted from the JSDoc already in the source, the only way they can never drift from the code.",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "rootDir": "src",
+    "outDir": "dist",
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "skipLibCheck": true,
+    "strict": false
+  },
+  "include": ["src/ol-elevation-profile.js"]
+}

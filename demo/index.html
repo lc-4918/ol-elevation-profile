@@ -159,6 +159,9 @@
         <option value="200">200 m/cm</option>
         <option value="400">400 m/cm</option>
         <option value="800">800 m/cm</option>
+        <option value="x4">&times;4 (exaggeration)</option>
+        <option value="x6">&times;6 (exaggeration)</option>
+        <option value="x8">&times;8 (exaggeration)</option>
       </select></div>
     <div class="row"><label data-i18n="dem">DEM (no Z)</label>
       <select id="dem" class="dem">
@@ -473,8 +476,13 @@
     // options want a number - 'auto' excepted, which is the one string verticalScale takes.
     const levelsEl = document.getElementById('zoomLevels');
     levelsEl.onchange = function () { profile.setOptions({ zoomLevels: +this.value }); };
+    // Three shapes behind one <select>: the string 'auto', a number of metres per
+    // centimetre, and an `x`-prefixed exaggeration, which is the ratio between the axes
+    // rather than a scale - the only one that keeps SLOPES comparable across tracks.
     document.getElementById('verticalScale').onchange = function () {
-      profile.setOptions({ verticalScale: this.value === 'auto' ? 'auto' : +this.value });
+      const v = this.value;
+      profile.setOptions({ verticalScale:
+        v === 'auto' ? 'auto' : (v[0] === 'x' ? { exaggeration: +v.slice(1) } : +v) });
     };
 
     const bindRange = (id, key, fmt) => {

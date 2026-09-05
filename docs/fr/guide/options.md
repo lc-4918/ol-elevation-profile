@@ -37,6 +37,7 @@ Raccourcis : `true` ou `'terrarium'` (AWS Terrain Tiles), `'ign'` (Géoplateform
 | `wms` | `{ url, layers, params, projection }` : tuiles WMS, un `GetMap` par tuile |
 | `olSource` | n'importe quelle `ol/source/TileImage` (XYZ, TileWMS, ...) ou `ol/source/GeoTIFF` |
 | `featureInfo` | `{ url, layers, queryLayers, property, resolution, params, projection }` : WMS GetFeatureInfo, une requête par point |
+| `track` | `{ url, coords, parse, fetchOptions }` : un profil que votre application a calculé en amont et sert par trace |
 | `sample` | `(lonlats, ctx) => number[] | Promise<number[]>` : vous les récupérez vous-même |
 
 Clés communes, quelle que soit la source :
@@ -66,8 +67,14 @@ Clés propres à une source :
 | `resolution` | `featureInfo` | `1` | Demi-côté, en mètres, de la boîte autour du point |
 | `params` | `wms`, `featureInfo` | - | Paramètres WMS supplémentaires, fusionnés par-dessus les défauts. Passer `VERSION` à 1.1.1 bascule seul `CRS` en `SRS` |
 | `projection` | `wms`, `featureInfo` | `'EPSG:3857'` | Système de référence des requêtes |
+| `url` | `track` | - | Gabarit lu sur l'entité, un `{propriete}` par emplacement, ou `(feature) => string`. Une propriété absente n'envoie aucune requête. Obligatoire |
+| `coords` | `track` | `'coords'` | Propriété de la réponse JSON qui porte les données. Ignorée si la réponse est elle-même un tableau |
+| `parse` | `track` | aucun | `(json, feature) => données`, pour reformer n'importe quelle réponse |
+| `fetchOptions` | `track` | aucun | Transmis tel quel à `fetch` (identifiants, en-têtes...) |
 
 Un remplissage est **tout ou rien** : un seul point non résolu l'abandonne, et le profil reste ce qu'il aurait été sans. L'événement `demload` en rend compte, `{ ok, zoom, tiles }`, avec `zoom: null` et `tiles: 0` pour une source non tuilée. Voir [Modèle de terrain](/fr/guide/fonctions#modele-de-terrain).
+
+`track` est la seule source qui n'échantillonne pas un modèle aux points de la trace, et elle accepte deux formes de réponse, qui ne veulent pas dire la même chose. `[[lon, lat, z], …]` porte **sa propre géométrie** et remplace celle de l'entité : un profil décimé à l'ingestion est accepté tel quel. Les horodatages de l'entité sont alors abandonnés, puisqu'ils ne correspondent plus à rien. Un simple `[z, …]` garde l'ancien sens : une valeur par point de la géométrie, et la longueur doit correspondre exactement. Dans les deux cas l'entité de la carte n'est jamais modifiée.
 
 **`smoothing`** : lissage de l'altitude. L'altitude de chaque point est remplacée par la moyenne des altitudes rencontrées sur **une demi-fenêtre de part et d'autre, le long du tracé**. La valeur est une distance en **mètres de tracé**, non un nombre de points : `smoothing: 100` moyenne sur 100 m que l'enregistrement porte un point par seconde ou un point tous les dix mètres. Défaut : `0` (altitudes brutes).
 
@@ -106,13 +113,18 @@ new OlElevationProfile({ smoothing: 60 })   // moyenne sur ±30 m de tracé
 
 **`yTicks`** : nombre de graduations de l'axe Y ; `null` laisse la librairie choisir selon la hauteur. Défaut : `null`.
 
-**`verticalScale`** : en `'auto'`, le profil remplit la hauteur. C'est lisible, mais l'échelle change d'une trace à l'autre, si bien qu'une pente de 2 % y prend l'allure d'un mur et que deux profils ne se comparent pas. Un **nombre** fixe les mètres couverts par centimètre physique, mesuré à l'écran plutôt que déduit des 96 ppp nominaux, ce qui suit le zoom du navigateur. Défaut : `'auto'`.
+**`verticalScale`** : en `'auto'`, le profil remplit la hauteur. C'est lisible, mais l'échelle change d'une trace à l'autre, si bien qu'une pente de 2 % y prend l'allure d'un mur et que deux profils ne se comparent pas. Un **nombre** fixe les mètres couverts par centimètre physique, mesuré à l'écran plutôt que déduit des 96 ppp nominaux, ce qui suit le zoom du navigateur. **`{ exaggeration: n }`** fixe au contraire le rapport entre l'échelle verticale et l'horizontale, le contrôle en déduisant les mètres par centimètre trace par trace. Défaut : `'auto'`.
 
-Ce nombre est un **plancher, non un carcan** : une trace dont l'amplitude dépasse ce que la hauteur peut montrer déborderait du cadre, ce qui est pire que de perdre la comparabilité. L'échelle s'élargit alors pour la contenir, sans rien en dire : aucune mention n'est portée sur le graphe, l'échelle étant une propriété de l'affichage et non de la trace. La valeur réellement appliquée est relisible dans `_vScale`, nul en `'auto'`.
+Un nombre rend les **amplitudes** comparables, pas les pentes. L'axe horizontal s'étire toujours sur toute la trace, si bien qu'une même pente de 5 % est dessinée trois fois plus raide sur une boucle de 3 km que sur une traversée de 30. `{ exaggeration }` fixe au contraire le rapport entre les deux axes, et ce sont les **pentes** qui deviennent comparables : la pente lue sur le graphe est la pente réelle, multipliée par le même facteur d'une trace à l'autre. Le contrôle recalcule les mètres par centimètre pour chaque trace, et de nouveau pour chaque recadrage A/B, à partir de la distance réellement affichée et de la largeur du graphe une fois les marges retirées — ce qui explique qu'on ne puisse pas le faire depuis l'extérieur.
+
+L'une comme l'autre forme est un **plancher, non un carcan** : une trace dont l'amplitude dépasse ce que la hauteur peut montrer déborderait du cadre, ce qui est pire que de perdre la comparabilité. L'échelle s'élargit alors pour la contenir, sans rien en dire : aucune mention n'est portée sur le graphe, l'échelle étant une propriété de l'affichage et non de la trace. La valeur réellement appliquée est relisible dans `_vScale`, nul en `'auto'` qui ne demande aucune échelle absolue. Le rapport réellement obtenu est relisible dans `_vExaggeration`, dans **tous** les modes : inférieur à celui demandé dès que le plancher a joué, et dérivant d'une trace à l'autre en `'auto'` — ce qui est précisément la raison pour laquelle `'auto'` ne rend deux profils comparables en rien.
 
 ```js
-new OlElevationProfile({ verticalScale: 50 })   // 50 m par centimètre
+new OlElevationProfile({ verticalScale: 50 })                  // 50 m par centimètre
+new OlElevationProfile({ verticalScale: { exaggeration: 6 } }) // vertical dilaté 6 fois
 ```
+
+Posée à la construction, une exagération n'appelle rien d'autre : voir [Pentes comparables](/fr/exemples#pentes-comparables-un-rapport-tenu-une-echelle-recalculee-a-chaque-trace) pour ce qu'elle produit trace par trace, et pour le choix du facteur.
 
 ## Pente
 
@@ -133,6 +145,14 @@ new OlElevationProfile({ verticalScale: 50 })   // 50 m par centimètre
 **`show`** : comment un tracé de la carte déclenche son profil : `'click'` ou `'mouseover'`. Défaut : `'click'`.
 
 **`hideOnMapClick`** : un clic sur la carte vide masque tout le contrôle. Défaut : `true`.
+
+**`showWithoutElevation`** : que faire d'une trace qui se retrouve sans aucune altitude — ni dans sa géométrie, ni par le modèle de terrain, parce que `dem` vaut `null` ou parce que le remplissage a échoué. `true` affiche le panneau avec le titre de la trace, ce que la géométrie seule sait encore en dire (sa longueur), et le message `noElevation` à la place du graphe. `false` masque purement le panneau. Défaut : `true`.
+
+Dans les deux cas **aucun graphe n'est dessiné**. Les points sans Z comptent pour zéro, si bien que la ligne s'aplatirait au niveau de la mer sous un `D+ 0 m` — non pas un chiffre manquant mais un chiffre faux, et c'est la raison même pour laquelle un remplissage par MNT est tout ou rien.
+
+```js
+new OlElevationProfile({ dem: null, showWithoutElevation: false })  // muet plutôt
+```
 
 **`followMap`** : déplacer le pointeur sur la carte déplace l'indicateur sur le graphe. Défaut : `true`.
 
@@ -162,9 +182,14 @@ Un bouton **retour** paraît à partir du deuxième niveau et défait un recadra
 
 **`headerItems`** : contenu de la ligne d'entête. Jetons : `'distance'`, `'ascent'`, `'descent'`, `'min'`, `'max'`, `'minmax'`, `'duration'` (durée totale). Une entrée peut aussi être un objet tirant une propriété du feature : `{ property, label?, asLink?, linkText? }` (`asLink` rend une URL sous forme de lien). Défaut : `['distance','ascent','descent','minmax']`.
 
-**`titleProperty`** : la propriété du feature utilisée comme titre. Défaut : `'name'`.
+**`titleProperty`** : la propriété du feature utilisée comme titre, ou une **liste** de propriétés essayées dans l'ordre — la première qui porte une valeur gagne, une valeur vide étant enjambée. Un feature qui ne répond à aucune retombe sur le libellé `untitled`, traduit. Défaut : `'name'`.
 
-**`titleLink`** : une propriété contenant une URL ; si présente, le titre devient un lien cliquable. Défaut : `null`.
+**`titleLink`** : une propriété contenant une URL — le titre devient alors un lien cliquable — ou une **liste** de propriétés essayées dans l'ordre. Seule une valeur qui est réellement une URL compte : une propriété qui porte autre chose est enjambée plutôt que rendue en lien mort. Défaut : `null`, qui ne met jamais de lien — on ne demande pas à un jeu de données d'expliquer que sa colonne `url` n'est pas celle qu'on montre au lecteur.
+
+```js
+new OlElevationProfile({ titleProperty: ['parcours', 'name'], titleLink: 'fiche' })
+new OlElevationProfile({ titleLink: ['link', 'url'] })     // selon ce que porte le jeu
+```
 
 **`lang`** : langue des libellés livrés : `'en'` (défaut), `'fr'`, `'es'`. Un code inconnu retombe sur l'anglais plutôt que de laisser des clés vides. Chaque jeu est complet : une traduction à trous ferait cohabiter deux langues dans le même panneau.
 
@@ -179,7 +204,7 @@ profile.setOptions({ lang: 'es' })     // bascule tous les libellés, boutons co
 
 **`labels`** : surcharges clé à clé, appliquées **par-dessus** `lang`, pour une formulation qu'on préfère choisir soi-même ou une langue non livrée. Seules les clés passées changent. Elles **survivent à un changement de langue** : une clé corrigée le reste, le reste suit le nouveau jeu. Défaut : `{}`.
 
-Les clés, avec leurs valeurs françaises (`lang: 'fr'`) : `distance` `'Distance'`, `elevation` `'Altitude'`, `slope` `'Pente'`, `ascent` `'D+'`, `descent` `'D-'` (notation des cartes, identique dans toutes les langues), `empty` `'Cliquez un tracé'` (titre par défaut), `time` `'Temps'`, `duration` `'Durée'`, `durationUnits` `{ s:'sec', m:'min', h:'h', d:'j' }` (abréviations d'unités), `zoomStart` `'Définir le début (A)'`, `zoomEnd` `'Définir la fin (B)'`, `zoomAll` `'Tout voir'`, `zoomBack` `'Revenir au niveau précédent'` (retour d'un niveau imbriqué), `exportPng` `'Exporter en PNG'` (bouton d'export), `collapse` `'Réduire le profil'` et `expand` `'Agrandir le profil'` (le bouton de repli, selon ce que le clic fera), `loading` `'Chargement du profil altimétrique'` (nom accessible du spinner de chargement du MNT).
+Les clés, avec leurs valeurs françaises (`lang: 'fr'`) : `distance` `'Distance'`, `elevation` `'Altitude'`, `slope` `'Pente'`, `ascent` `'D+'`, `descent` `'D-'` (notation des cartes, identique dans toutes les langues), `empty` `'Cliquez un tracé'` (titre par défaut), `untitled` `'Profil'` (titre d'un feature sans propriété de nom), `noElevation` `'Aucune altimétrie'` (affiché à la place du graphe, voir `showWithoutElevation`), `time` `'Temps'`, `duration` `'Durée'`, `durationUnits` `{ s:'sec', m:'min', h:'h', d:'j' }` (abréviations d'unités), `zoomStart` `'Définir le début (A)'`, `zoomEnd` `'Définir la fin (B)'`, `zoomAll` `'Tout voir'`, `zoomBack` `'Revenir au niveau précédent'` (retour d'un niveau imbriqué), `exportPng` `'Exporter en PNG'` (bouton d'export), `collapse` `'Réduire le profil'` et `expand` `'Agrandir le profil'` (le bouton de repli, selon ce que le clic fera), `loading` `'Chargement du profil altimétrique'` (nom accessible du spinner de chargement du MNT).
 
 ```js
 // L'italien, par exemple : une langue non livrée
@@ -222,6 +247,7 @@ const profile = new OlElevationProfile({
                                     //   | { wms: { url, layers } }
                                     //   | { olSource }        // TileImage ou GeoTIFF
                                     //   | { featureInfo: { url, layers, property } }
+                                    //   | { track: { url: '/profils/{id}.json' } }
   smoothing: 0,                     // fenêtre de lissage de l'altitude, en mètres
 
   // Apparence
@@ -234,6 +260,7 @@ const profile = new OlElevationProfile({
   xTicks: null,                     // null = auto | nombre
   yTicks: null,                     // null = auto | nombre
   verticalScale: 'auto',            // 'auto' = remplit la hauteur | nombre = mètres par centimètre
+                                    //   | { exaggeration: 6 } = rapport vertical/horizontal fixe
 
   // Pente
   slope: false,
@@ -246,6 +273,7 @@ const profile = new OlElevationProfile({
   // Comportement
   show: 'click',                    // 'click' | 'mouseover'
   hideOnMapClick: true,
+  showWithoutElevation: true,        // aucun Z par aucune voie : panneau + message, ou masqué
   followMap: true,
   marker: true,
   collapsable: true,
@@ -259,8 +287,8 @@ const profile = new OlElevationProfile({
   // Contenu
   tooltipItems: ['distance', 'elevation'],                  // + 'slope', 'time'
   headerItems: ['distance', 'ascent', 'descent', 'minmax'], // + 'min','max','duration' ou {property,...}
-  titleProperty: 'name',
-  titleLink: null,                  // propriété contenant une URL
+  titleProperty: 'name',            // ou une liste, essayée dans l'ordre
+  titleLink: null,                  // un nom, ou une liste : la première vraie URL gagne
   lang: 'en',                       // 'en' | 'fr' | 'es'
   labels: {}                        // surcharges clé à clé, par-dessus lang
 })

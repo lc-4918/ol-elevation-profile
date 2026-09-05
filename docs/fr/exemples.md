@@ -28,6 +28,7 @@ const profile = new OlElevationProfile({
                                     //   | { wms: { url, layers } }
                                     //   | { olSource }        // TileImage ou GeoTIFF
                                     //   | { featureInfo: { url, layers, property } }
+                                    //   | { track: { url: '/profils/{id}.json' } }
 
   // Apparence
   theme: 'steelblue',               // steelblue | lime | purple | slate | graphite | amber | {area,line,axis,text,focus}
@@ -39,6 +40,7 @@ const profile = new OlElevationProfile({
   xTicks: null,                     // null = auto | nombre
   yTicks: null,                     // null = auto | nombre
   verticalScale: 'auto',            // 'auto' = remplit la hauteur | nombre = mètres par centimètre
+                                    //   | { exaggeration: 6 } = rapport vertical/horizontal fixe
 
   // Pente
   slope: false,
@@ -51,6 +53,7 @@ const profile = new OlElevationProfile({
   // Comportement
   show: 'click',                    // 'click' | 'mouseover'
   hideOnMapClick: true,
+  showWithoutElevation: true,       // aucun Z par aucune voie : panneau + message
   followMap: true,
   marker: true,
   collapsable: true,
@@ -64,8 +67,8 @@ const profile = new OlElevationProfile({
   // Contenu
   tooltipItems: ['distance', 'elevation'],                  // + 'slope', 'time'
   headerItems: ['distance', 'ascent', 'descent', 'minmax'], // + 'min','max','duration' ou {property,...}
-  titleProperty: 'name',
-  titleLink: null,                  // propriété contenant une URL
+  titleProperty: 'name',            // ou une liste, essayée dans l'ordre
+  titleLink: null,                  // un nom, ou une liste : la première vraie URL gagne
   lang: 'en',                       // 'en' | 'fr' | 'es'
   labels: {}                        // surcharges clé à clé, par-dessus lang
 })
@@ -129,6 +132,84 @@ const p = new OlElevationProfile({ verticalScale: 50 })   // 50 m par centimètr
 p.setOptions({ verticalScale: 'auto' })                   // retour au remplissage de la hauteur
 ```
 
+## Pentes comparables : un rapport tenu, une échelle recalculée à chaque trace
+
+Un nombre fixe rend les **amplitudes** comparables, pas les pentes : l'axe horizontal
+s'étire sur toute la trace, si bien qu'une même pente de 5 % est dessinée trois fois plus
+raide sur une boucle de 3 km que sur une traversée de 30. Une exagération **tient** au contraire le
+rapport entre les deux axes, et ce sont les mètres par centimètre que le contrôle recalcule
+pour chaque trace qu'on lui donne. Le nombre est l'invariant : c'est pourquoi c'est un
+nombre et non `'auto'`, qui n'aurait plus rien à tenir. `verticalScale: 'auto'` est
+justement le cas où le rapport dérive librement.
+
+| `verticalScale` | tenu | varie | comparable d'une trace à l'autre |
+|---|---|---|---|
+| `'auto'` | la hauteur, remplie | l'échelle **et** le rapport | rien |
+| `50` | 50 m/cm | le rapport | les **amplitudes** |
+| `{ exaggeration: 6 }` | le rapport, ×6 | l'échelle | les **pentes** |
+
+Le rapport que chaque mode produit réellement, sur les quatre mêmes traces :
+
+| `verticalScale` | 2,5 km | 10,3 km | 23,4 km | 123 km |
+|---|---|---|---|---|
+| `'auto'` | ×3,18 | ×10,73 | ×7,66 | ×12,84 |
+| `50` | ×1,73 | ×7,14 | ×8,80 | ×15,61 |
+| `{ exaggeration: 6 }` | ×3,58 | ×6,00 | ×6,00 | ×6,00 |
+
+Sous les deux premiers, une pente de 5 % est dessinée quatre à neuf fois plus plate sur une
+trace que sur une autre, et l'œil n'a aucun moyen de le savoir. Seule la troisième ligne
+tient — là où le plancher le permet.
+
+
+**On la pose une fois, à la construction. Il n'y a rien à recalculer par trace :**
+
+```js
+const profile = new OlElevationProfile({ verticalScale: { exaggeration: 6 } })
+map.addControl(profile)
+
+profile.setFeature(petiteBoucle)   // 2,5 km  -> l'échelle se resserre
+profile.setFeature(grandeTraversee) // 123 km -> l'échelle s'élargit, le rapport tient
+```
+
+Une application qui calcule un nombre elle-même doit le refaire à chaque sélection, et se
+trompe encore sur un recadrage :
+
+```js
+// À éviter : c'est ce que { exaggeration } fait déjà, moins les cas qu'il traite juste
+profile.setOptions({ verticalScale: metresParCm(trace.km) })   // à chaque clic
+```
+
+Ce que le même `{ exaggeration: 6 }` produit sur un panneau de 1160 × 300, sans un seul
+appel de l'application :
+
+| trace | mètres par centimètre | obtenu |
+|---|---|---|
+| 2,5 km, 150 m d'amplitude | 24,2 | ×3,58 |
+| 10,3 km | 59,5 | ×6,00 |
+| 23,4 km | 135,2 | ×6,00 |
+| 123,2 km, 1 800 m d'amplitude | 711,7 | ×6,00 |
+
+L'échelle varie d'un facteur trente ; le rapport tient. Deux choses que l'application
+n'aurait pas pu faire du dehors : la largeur du graphe n'est connue qu'une fois les marges
+et la disposition du panneau résolues, et un recadrage A/B change la distance affichée sans
+changer la trace.
+
+La première ligne est le **plancher** qui joue : 150 m d'amplitude dans 6,6 cm de hauteur
+exigent au moins 24,2 m/cm, là où ×6 n'en demanderait que 14,5. Plutôt que de déborder du
+cadre, l'échelle s'élargit et le rapport retombe. Rien sur le graphe ne le dit, l'échelle
+étant une propriété de l'affichage et non de la trace — cela se relit :
+
+```js
+profile._vScale           // mètres par centimètre réellement appliqués ; nul en 'auto',
+                          //   qui ne demande aucune échelle absolue
+profile._vExaggeration    // rapport réellement obtenu, dans tous les modes : sous 6 dès
+                          //   que le plancher a joué, et dérivant par trace en 'auto'
+```
+
+Le facteur se choisit d'après le terrain plutôt qu'au goût : 4 à 6 conviennent à un relief
+vallonné, 8 à 10 rendent lisible une voie verte, 2 à 3 empêchent la haute montagne de
+ressembler à une scie.
+
 ## Langue
 
 L'anglais par défaut ; le français et l'espagnol sont livrés avec la librairie, et `labels` couvre tout le reste.
@@ -141,11 +222,23 @@ profile.setOptions({ lang: 'es' })                    // bascule tout, boutons c
 new OlElevationProfile({ lang: 'fr', labels: { empty: 'Choisissez un itinéraire' } })
 ```
 
-## Détecter les tracés sans altitude
+## Tracés sans altitude
+
+Le contrôle traite le cas lui-même : un tracé qui se retrouve sans Z par aucune voie
+affiche le panneau, son titre, et un message à la place du graphe — plutôt qu'une ligne
+plate au niveau zéro.
+
+```js
+new OlElevationProfile({ showWithoutElevation: true })              // le défaut
+new OlElevationProfile({ showWithoutElevation: false })             // masquer le panneau
+new OlElevationProfile({ labels: { noElevation: 'Relevé à venir' } })
+```
+
+`featureHasZ` reste là pour décider d'autre chose — une pastille dans une liste, un filtre :
 
 ```js
 if (!OlElevationProfile.featureHasZ(feature)) {
-  // avertir que ce tracé n'a pas d'altimétrie
+  // ce tracé ne porte pas d'altimétrie propre
 }
 ```
 
@@ -200,7 +293,18 @@ new OlElevationProfile({
                         property: 'GRAY_INDEX' }, concurrency: 8 }
 });
 
-// 10. Tout le reste : vous récupérez les altitudes, le contrôle garde la politique
+// 10. Un profil que votre application a calculé en amont, servi par trace. La seule
+//     source qui répond avec la trace ENTIÈRE : `[[lon,lat,z],…]` remplace la
+//     géométrie, si bien qu'un profil décimé à l'ingestion est accepté tel quel.
+new OlElevationProfile({
+  dem: { track: { url: '/profils/{id}.json' } }          // {id} lu sur l'entité
+});
+new OlElevationProfile({
+  dem: { track: { url: (f) => `/api/traces/${f.getId()}/profil`,
+                  parse: (json) => json.altimetrie.points } }
+});
+
+// 11. Tout le reste : vous récupérez les altitudes, le contrôle garde la politique
 new OlElevationProfile({
   dem: async (lonlats) => {
     const r = await fetch('/api/altitudes', { method: 'POST', body: JSON.stringify(lonlats) });

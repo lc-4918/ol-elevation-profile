@@ -37,6 +37,7 @@ Shorthands: `true` or `'terrarium'` (AWS Terrain Tiles), `'ign'` (IGN Géoplatef
 | `wms` | `{ url, layers, params, projection }`: WMS tiles, one `GetMap` per tile |
 | `olSource` | any `ol/source/TileImage` (XYZ, TileWMS, ...) or `ol/source/GeoTIFF` |
 | `featureInfo` | `{ url, layers, queryLayers, property, resolution, params, projection }`: WMS GetFeatureInfo, one request per point |
+| `track` | `{ url, coords, parse, fetchOptions }`: a profile your application computed beforehand and serves per track |
 | `sample` | `(lonlats, ctx) => number[] | Promise<number[]>`: you fetch them yourself |
 
 Common keys, whatever the source:
@@ -66,8 +67,14 @@ Source-specific keys:
 | `resolution` | `featureInfo` | `1` | Half-size, in metres, of the box around the point |
 | `params` | `wms`, `featureInfo` | - | Extra WMS parameters, merged over the defaults. Changing `VERSION` to 1.1.1 switches `CRS` to `SRS` on its own |
 | `projection` | `wms`, `featureInfo` | `'EPSG:3857'` | Reference system of the requests |
+| `url` | `track` | - | Template read off the feature, `{property}` per placeholder, or `(feature) => string`. A missing property sends no request. Required |
+| `coords` | `track` | `'coords'` | Property of the JSON answer holding the data. Ignored when the answer is an array itself |
+| `parse` | `track` | none | `(json, feature) => data`, to reshape any answer |
+| `fetchOptions` | `track` | none | Passed straight to `fetch` (credentials, headers, ...) |
 
 A fill is **all or nothing**: one unresolved point abandons it, and the profile stays as it would have been without. The `demload` event reports the outcome, `{ ok, zoom, tiles }`, with `zoom: null` and `tiles: 0` for a source that is not tiled. See [Terrain model](/guide/features#terrain-model).
+
+`track` is the one source that does not sample a model at the track's own points, and it accepts two shapes of answer, which do not mean the same thing. `[[lon, lat, z], …]` carries **its own geometry** and replaces the feature's, so a profile decimated at ingestion is accepted as it is; time data on the feature is then dropped, since its timestamps no longer line up with anything. A plain `[z, …]` keeps the old meaning: one value per point of the geometry, and the length must match exactly. Either way the feature on the map is never modified.
 
 **`smoothing`**: elevation smoothing. Each point's elevation is replaced by the average of the elevations found within **half the window on either side, along the track**. The value is a distance in **metres of track**, not a number of points: `smoothing: 100` averages over 100 m whether the recording holds a point every second or every ten metres. Default: `0` (raw elevations).
 
@@ -106,13 +113,18 @@ new OlElevationProfile({ smoothing: 60 })   // average over ±30 m of track
 
 **`yTicks`**: number of Y-axis ticks; `null` lets the library choose from the height. Default: `null`.
 
-**`verticalScale`**: `'auto'` makes the profile fill the height, which is legible, but the scale changes from one track to the next, so a 2 % ramp looks like a wall and two profiles cannot be compared. A **number** fixes the metres covered per physical centimetre, measured on the screen rather than deduced from the nominal 96 dpi, so it follows browser zoom. Default: `'auto'`.
+**`verticalScale`**: `'auto'` makes the profile fill the height, which is legible, but the scale changes from one track to the next, so a 2 % ramp looks like a wall and two profiles cannot be compared. A **number** fixes the metres covered per physical centimetre, measured on the screen rather than deduced from the nominal 96 dpi, so it follows browser zoom. **`{ exaggeration: n }`** fixes the ratio between the vertical and horizontal scales instead, the control deriving the metres per centimetre per track. Default: `'auto'`.
 
-The number is a **floor, not a cage**: a track whose range exceeds what the height can show would spill out of the frame, which is worse than losing comparability. The scale then widens to contain it, silently: nothing is drawn on the chart to announce the scale, which is a property of the display rather than of the track. The value actually applied is read back from `_vScale`, `null` in `'auto'`.
+A number makes **ranges** comparable, not slopes. The horizontal axis always stretches over the whole track, so the same 5 % ramp is drawn three times steeper on a 3 km loop than on a 30 km traverse. `{ exaggeration }` fixes the ratio between the two axes instead, and it is **slopes** that become comparable: the gradient read off the chart is the real one, multiplied by the same factor on every track. The control recomputes the metres per centimetre for each track, and again for each A/B crop, from the distance actually displayed and the chart width once the margins are off — which is why it cannot be done from outside.
+
+Either form is a **floor, not a cage**: a track whose range exceeds what the height can show would spill out of the frame, which is worse than losing comparability. The scale then widens to contain it, silently: nothing is drawn on the chart to announce the scale, which is a property of the display rather than of the track. The value actually applied is read back from `_vScale`, `null` under `'auto'` which requests no absolute scale. The ratio actually obtained is read back from `_vExaggeration`, in **every** mode: below the one asked for whenever the floor has played, and drifting from one track to the next under `'auto'` — which is exactly why `'auto'` makes no two profiles comparable.
 
 ```js
-new OlElevationProfile({ verticalScale: 50 })   // 50 m per centimetre
+new OlElevationProfile({ verticalScale: 50 })                  // 50 m per centimetre
+new OlElevationProfile({ verticalScale: { exaggeration: 6 } }) // vertical stretched 6x
 ```
+
+Set at construction, an exaggeration needs nothing further: see [Comparable slopes](/examples#comparable-slopes-a-held-ratio-a-scale-recomputed-per-track) for what it produces track by track, and for choosing the factor.
 
 ## Slope
 
@@ -133,6 +145,14 @@ new OlElevationProfile({ verticalScale: 50 })   // 50 m per centimetre
 **`show`**: how a track on the map triggers its profile: `'click'` or `'mouseover'`. Default: `'click'`.
 
 **`hideOnMapClick`**: a click on the empty map hides the whole control. Default: `true`.
+
+**`showWithoutElevation`**: what to do with a track that ends up with no elevation at all — none in its geometry, and none the terrain model could supply either, because `dem` is `null` or because the fill failed. `true` shows the panel with the track's title, whatever the geometry alone can still say (its length), and the `noElevation` message where the chart would be. `false` hides the panel outright. Default: `true`.
+
+Either way **no chart is drawn**. Points with no Z count as zero, so the line would sit flat at sea level under a `D+ 0 m` — not a missing figure but a wrong one, and the same reason a terrain-model fill is all or nothing.
+
+```js
+new OlElevationProfile({ dem: null, showWithoutElevation: false })  // silent instead
+```
 
 **`followMap`**: moving the pointer over the map moves the indicator on the chart. Default: `true`.
 
@@ -162,9 +182,14 @@ A **back** button appears from the second level and undoes one crop; **show all*
 
 **`headerItems`**: what the header line shows. String tokens: `'distance'`, `'ascent'`, `'descent'`, `'min'`, `'max'`, `'minmax'`, `'duration'` (total elapsed time). An entry can also be an object pulling a feature property: `{ property, label?, asLink?, linkText? }` (`asLink` renders a URL value as a link). Default: `['distance','ascent','descent','minmax']`.
 
-**`titleProperty`**: the feature property used as the title. Default: `'name'`.
+**`titleProperty`**: the feature property used as the title, or a **list** of them tried in order — the first one holding a value wins, an empty one being stepped over. A feature answering to none of them falls back on the `untitled` label, which is localised. Default: `'name'`.
 
-**`titleLink`**: a feature property holding a URL; when present, the title becomes a clickable link. Default: `null`.
+**`titleLink`**: a feature property holding a URL — the title then becomes a clickable link — or a **list** of them tried in order. Only a value that really is a URL counts: a property holding anything else is stepped over rather than rendered as a dead link. Default: `null`, which never links the title, a dataset not being asked to explain that its `url` column is not the one meant for the reader.
+
+```js
+new OlElevationProfile({ titleProperty: ['parcours', 'name'], titleLink: 'fiche' })
+new OlElevationProfile({ titleLink: ['link', 'url'] })     // whichever the dataset uses
+```
 
 **`lang`**: language of the shipped labels: `'en'` (default), `'fr'`, `'es'`. An unknown code falls back to English rather than leaving keys empty. Each set is complete: a partial translation would put two languages in the same panel.
 
@@ -179,7 +204,7 @@ profile.setOptions({ lang: 'fr' })     // switches every label, buttons included
 
 **`labels`**: per-key overrides applied on top of `lang`, for a wording you would rather choose yourself or a language that is not shipped. Only the keys you pass change. They **survive a language change**: a corrected key stays corrected, the rest follows the new set. Default: `{}`.
 
-Keys, with their English values: `distance` `'Distance'`, `elevation` `'Elevation'`, `slope` `'Slope'`, `ascent` `'D+'`, `descent` `'D-'` (map notation, the same in every language), `empty` `'Click a track'` (placeholder title), `time` `'Time'`, `duration` `'Duration'`, `durationUnits` `{ s:'sec', m:'min', h:'h', d:'d' }` (time unit abbreviations), `zoomStart` `'Set start (A)'`, `zoomEnd` `'Set end (B)'`, `zoomAll` `'Show all'`, `zoomBack` `'Back one level'` (back one nested crop), `exportPng` `'Export as PNG'` (export button), `collapse` `'Collapse the profile'` and `expand` `'Expand the profile'` (the collapse button, whichever the click will do), `loading` `'Loading the elevation profile'` (accessible name of the terrain-model spinner).
+Keys, with their English values: `distance` `'Distance'`, `elevation` `'Elevation'`, `slope` `'Slope'`, `ascent` `'D+'`, `descent` `'D-'` (map notation, the same in every language), `empty` `'Click a track'` (placeholder title), `untitled` `'Profile'` (title of a feature with no name property), `noElevation` `'No elevation data'` (shown in place of the chart, see `showWithoutElevation`), `time` `'Time'`, `duration` `'Duration'`, `durationUnits` `{ s:'sec', m:'min', h:'h', d:'d' }` (time unit abbreviations), `zoomStart` `'Set start (A)'`, `zoomEnd` `'Set end (B)'`, `zoomAll` `'Show all'`, `zoomBack` `'Back one level'` (back one nested crop), `exportPng` `'Export as PNG'` (export button), `collapse` `'Collapse the profile'` and `expand` `'Expand the profile'` (the collapse button, whichever the click will do), `loading` `'Loading the elevation profile'` (accessible name of the terrain-model spinner).
 
 ```js
 // Italian, say: a language that is not shipped
@@ -222,6 +247,7 @@ const profile = new OlElevationProfile({
                                     //   | { wms: { url, layers } }
                                     //   | { olSource }        // TileImage or GeoTIFF
                                     //   | { featureInfo: { url, layers, property } }
+                                    //   | { track: { url: '/profils/{id}.json' } }
   smoothing: 0,                     // elevation smoothing window, in metres
 
   // Appearance
@@ -234,6 +260,7 @@ const profile = new OlElevationProfile({
   xTicks: null,                     // null = auto | number
   yTicks: null,                     // null = auto | number
   verticalScale: 'auto',            // 'auto' = fills the height | number = metres per centimetre
+                                    //   | { exaggeration: 6 } = fixed vertical/horizontal ratio
 
   // Slope
   slope: false,
@@ -246,6 +273,7 @@ const profile = new OlElevationProfile({
   // Behaviour
   show: 'click',                    // 'click' | 'mouseover'
   hideOnMapClick: true,
+  showWithoutElevation: true,        // no Z by any route: panel + message, or hidden
   followMap: true,
   marker: true,
   collapsable: true,
@@ -259,8 +287,8 @@ const profile = new OlElevationProfile({
   // Content
   tooltipItems: ['distance', 'elevation'],                  // + 'slope', 'time'
   headerItems: ['distance', 'ascent', 'descent', 'minmax'], // + 'min','max','duration' or {property,...}
-  titleProperty: 'name',
-  titleLink: null,                  // feature property holding a URL
+  titleProperty: 'name',            // or a list, tried in order
+  titleLink: null,                  // a name, or a list: the first real URL wins
   lang: 'en',                       // 'en' | 'fr' | 'es'
   labels: {}                        // per-key overrides, applied on top of lang
 })

@@ -83,6 +83,12 @@
 /* ---- terrain-model loading spinner ---- */
 /* Takes --oep-area, so it wears the theme colour - and the track colour under color:'auto'. */
 .oep-loading { display: flex; align-items: center; justify-content: center; }
+/* Same box as the spinner, and for the same reason: it holds the chart's height, so the
+   panel does not jump if a profile turns up afterwards. */
+.oep-noelev {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; opacity: .65; text-align: center; padding: 0 12px;
+}
 .oep-spinner {
   width: 26px; height: 26px; box-sizing: border-box;
   border: 3px solid var(--oep-area);

@@ -45,6 +45,9 @@ import OlElevationProfile from 'ol-elevation-profile'
 import 'ol-elevation-profile/css'
 ```
 
+TypeScript needs nothing extra: the package ships its own declarations, generated from the
+source's JSDoc, and both lines above are typed — the stylesheet subpath included.
+
 ## Usage
 
 ```js

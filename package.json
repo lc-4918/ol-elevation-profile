@@ -10,11 +10,15 @@
   "style": "dist/ol-elevation-profile.css",
   "exports": {
     ".": {
+      "types": "./dist/ol-elevation-profile.d.ts",
       "import": "./dist/ol-elevation-profile.esm.js",
       "require": "./dist/ol-elevation-profile.js",
       "default": "./dist/ol-elevation-profile.js"
     },
-    "./css": "./dist/ol-elevation-profile.css",
+    "./css": {
+      "types": "./dist/css.d.ts",
+      "default": "./dist/ol-elevation-profile.css"
+    },
     "./dist/*": "./dist/*",
     "./src/*": "./src/*"
   },
@@ -31,12 +35,13 @@
     "*.css"
   ],
   "scripts": {
-    "build": "rollup -c && cp src/ol-elevation-profile.css dist/ol-elevation-profile.css",
+    "build": "rollup -c && npm run build:types && cp src/ol-elevation-profile.css dist/ol-elevation-profile.css && cp src/css.d.ts dist/css.d.ts",
     "prepublishOnly": "npm run build",
-    "test": "node test/smoke.cjs && node test/ol-sources.mjs",
+    "test": "node test/smoke.cjs && node test/ol-sources.mjs && node test/track-source.mjs && node test/vertical-scale.mjs && node test/types.mjs && node test/no-elevation.mjs && node test/title.mjs && node test/package.mjs",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
-    "docs:preview": "vitepress preview docs"
+    "docs:preview": "vitepress preview docs",
+    "build:types": "tsc -p tsconfig.types.json"
   },
   "keywords": [
     "openlayers",
@@ -61,6 +66,7 @@
     "jsdom": "^25.0.0",
     "ol": "^10.10.0",
     "rollup": "^4.62.2",
+    "typescript": "^7.0.2",
     "vitepress": "^1.6.4"
   },
   "license": "MIT",
@@ -72,5 +78,6 @@
   },
   "bugs": {
     "url": "https://github.com/lc-4918/ol-elevation-profile/issues"
-  }
+  },
+  "types": "./dist/ol-elevation-profile.d.ts"
 }

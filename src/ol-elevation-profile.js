@@ -49,6 +49,8 @@ import * as d3 from 'd3';
     en: {
       distance: 'Distance', elevation: 'Elevation', slope: 'Slope',
       ascent: 'D+', descent: 'D-', empty: 'Click a track',
+      noElevation: 'No elevation data',
+      untitled: 'Profile',
       time: 'Time', duration: 'Duration',
       durationUnits: { s: 'sec', m: 'min', h: 'h', d: 'd' },
       zoomStart: 'Set start (A)', zoomEnd: 'Set end (B)', zoomAll: 'Show all',
@@ -60,6 +62,8 @@ import * as d3 from 'd3';
     fr: {
       distance: 'Distance', elevation: 'Altitude', slope: 'Pente',
       ascent: 'D+', descent: 'D-', empty: 'Cliquez un tracé',
+      noElevation: 'Aucune altimétrie',
+      untitled: 'Profil',
       time: 'Temps', duration: 'Durée',
       durationUnits: { s: 'sec', m: 'min', h: 'h', d: 'j' },
       zoomStart: 'Définir le début (A)', zoomEnd: 'Définir la fin (B)', zoomAll: 'Tout voir',
@@ -71,6 +75,8 @@ import * as d3 from 'd3';
     es: {
       distance: 'Distancia', elevation: 'Altitud', slope: 'Pendiente',
       ascent: 'D+', descent: 'D-', empty: 'Haga clic en una traza',
+      noElevation: 'Sin datos de altitud',
+      untitled: 'Perfil',
       time: 'Tiempo', duration: 'Duración',
       durationUnits: { s: 'seg', m: 'min', h: 'h', d: 'd' },
       zoomStart: 'Definir el inicio (A)', zoomEnd: 'Definir el final (B)', zoomAll: 'Ver todo',
@@ -107,8 +113,11 @@ import * as d3 from 'd3';
     xTicks: null,
     yTicks: null,
     verticalScale: 'auto',        // 'auto' : le profil remplit la hauteur ;
-                                  // un nombre : mètres par centimètre physique
+                                  // un nombre : mètres par centimètre physique ;
+                                  // { exaggeration } : rapport fixe vertical/horizontal
     show: 'click',
+    showWithoutElevation: true,   // trace sans Z, et aucun MNT n'a pu en fournir :
+                                  // le panneau paraît quand même, avec un message
     collapsable: true,
     collapsed: false,
     followMap: true,
@@ -123,8 +132,8 @@ import * as d3 from 'd3';
     stopSpeed: 0.5,               // stop threshold in m/s (~1.8 km/h)
     tooltipItems: ['distance', 'elevation'],
     headerItems: ['distance', 'ascent', 'descent', 'minmax'],
-    titleProperty: 'name',
-    titleLink: null,
+    titleProperty: 'name',        // ou une liste, essayée dans l'ordre
+    titleLink: null,              // ou un nom, ou une liste : la première vraie URL gagne
     lang: 'en',                   // 'en' | 'fr' | 'es' : jeu de libellés livré
     labels: {}                    // surcharges clé à clé, appliquées par-dessus la langue
   };
@@ -741,6 +750,15 @@ import * as d3 from 'd3';
     if (typeof opt === 'function') return Object.assign({}, DEM_DEFAULTS, { sample: opt });
     const raw = (opt === true || typeof opt === 'string') ? { source: opt === true ? 'terrarium' : opt } : Object.assign({}, opt);
     if (typeof raw.sample === 'function') return Object.assign({}, DEM_DEFAULTS, raw);
+    // A precomputed profile, held by the application and keyed by the track. It is the one
+    // source that answers with the WHOLE track rather than one value per point: no grid to
+    // choose, no pixels to decode, and nothing to sample.
+    if (raw.track) {
+      const trCfg = Object.assign({}, DEM_DEFAULTS, raw);
+      trCfg.track = Object.assign({ coords: 'coords', parse: null, fetchOptions: null },
+                                  typeof raw.track === 'string' ? { url: raw.track } : raw.track);
+      return trCfg.track.url ? trCfg : null;
+    }
     // A point-query source: no tile grid, no pixel decoding.
     if (raw.featureInfo) {
       const fiCfg = Object.assign({}, DEM_DEFAULTS, raw);
@@ -760,6 +778,25 @@ import * as d3 from 'd3';
     const cfg = Object.assign({}, DEM_DEFAULTS, preset, raw);
     if (cfg.api === 'ign') { cfg.sample = ignSampler(cfg); return cfg; }   // a point API
     return (cfg.url || cfg.wms || cfg.olSource) ? cfg : null;
+  }
+
+  /**
+   * L'URL du profil d'une trace : un gabarit `{propriete}` lu sur l'entité, ou une fonction.
+   *
+   * Une propriété absente rend `null` plutôt qu'une URL trouée : demander `/profils/.json`
+   * ferait répondre le serveur - souvent par un 404, parfois par autre chose - là où la
+   * question n'a simplement pas de sens pour cette trace.
+   */
+  function trackUrl(tpl, feature) {
+    if (typeof tpl === 'function') return tpl(feature) || null;
+    if (typeof tpl !== 'string' || !feature) return null;
+    let complet = true;
+    const url = tpl.replace(/\{(\w+)\}/g, (_, cle) => {
+      const v = feature.get(cle);
+      if (v == null || v === '') { complet = false; return ''; }
+      return encodeURIComponent(String(v));
+    });
+    return complet ? url : null;
   }
 
   /**
@@ -799,14 +836,23 @@ import * as d3 from 'd3';
    * @property {number} [smoothing=0] Elevation smoothing window, in METERS (0 = none).
    * @property {?number} [xTicks=null] X axis ticks (null = auto from width).
    * @property {?number} [yTicks=null] Y axis ticks (null = auto from height).
-   * @property {('auto'|number)} [verticalScale='auto'] `'auto'`: the profile fills the
-   *   height, which is legible but changes scale from one track to the next, so a 2 % ramp
-   *   looks like a wall and two profiles cannot be compared. A number fixes the metres
-   *   covered per physical centimetre. It is a **floor**, not a cage: a track whose range
-   *   exceeds what the height can show would spill out of the frame, which is worse than
-   *   losing comparability: the scale then widens silently, nothing being drawn on the
-   *   chart to say so.
+   * @property {('auto'|number|{exaggeration:number})} [verticalScale='auto'] `'auto'`: the
+   *   profile fills the height, which is legible but changes scale from one track to the
+   *   next, so a 2 % ramp looks like a wall and two profiles cannot be compared. A number
+   *   fixes the metres covered per physical centimetre, which makes RANGES comparable.
+   *   `{exaggeration}` fixes the ratio between the two axes instead, which makes SLOPES
+   *   comparable: the gradient read off the chart is the real one, multiplied by the same
+   *   factor on every track, and the control recomputes it per track and per A/B crop.
+   *   Either form is a **floor**, not a cage: a track whose range exceeds what the height
+   *   can show would spill out of the frame, which is worse than losing comparability, so
+   *   the scale then widens silently, nothing being drawn on the chart to say so.
    * @property {'click'|'mouseover'} [show='click'] How a track is selected on the map.
+   * @property {boolean} [showWithoutElevation=true] What to do with a track that ends up
+   *   with no elevation at all: none in its geometry, and none the terrain model could
+   *   supply either (`dem: null`, or a fill that failed). `true` shows the panel with the
+   *   track's title and the `noElevation` message where the chart would be; `false` hides
+   *   the panel outright. Either way no chart is drawn: a flat line at zero under a D+ of
+   *   0 m is not a missing figure, it is a wrong one.
    * @property {boolean} [hideOnMapClick=true] Click on empty map hides the profile.
    * @property {boolean} [collapsable=true] Show the collapse/expand button.
    * @property {boolean} [collapsed=false] Initial collapsed state.
@@ -827,8 +873,14 @@ import * as d3 from 'd3';
    *   code falls back to English rather than leaving keys empty.
    * @property {Object} [labels={}] Per-key overrides applied on top of `lang`. They survive
    *   a later language change, so a corrected key stays corrected.
-   * @property {string} [titleProperty='name'] Feature property used as the title.
-   * @property {?string} [titleLink=null] Feature property holding a URL, making the title a link.
+   * @property {(string|string[])} [titleProperty='name'] Feature property used as the title,
+   *   or a list of them tried in order - the first one holding a value wins. A feature with
+   *   none falls back on the `untitled` label.
+   * @property {?(string|string[])} [titleLink=null] Feature property holding a URL, which
+   *   makes the title a link, or a list tried in order - the first one holding an actual
+   *   URL wins, so a property carrying something else is stepped over rather than rendered
+   *   as a broken link. `null`, the default, never links the title: a dataset is not asked
+   *   to explain that its `url` column is not the one meant for the reader.
    * @property {number} [maxPoints=2000] Decimation for render/interaction (stats use full data).
    * @property {?import('ol/proj/Projection').default|string} [dataProjection=null] Projection of the feature coordinates.
    * @property {?(boolean|string|Function|Object)} [dem='terrarium'] Fill missing elevations
@@ -838,6 +890,11 @@ import * as d3 from 'd3';
    *   `{olSource}` = any `ol/source/TileImage` (XYZ, TileWMS, and so on);
    *   `{featureInfo:{url,layers,property}}` = WMS GetFeatureInfo, one request per point,
    *   for a greyscale coverage that cannot be decoded from its pixels (slow);
+   *   `{track:{url,coords,parse,fetchOptions}}` = a profile the application computed
+   *   beforehand and serves per track, `url` being a `{property}` template read off the
+   *   feature (or a function). Unlike every other source it answers with the whole track:
+   *   `[[lon,lat,z],…]` replaces the geometry, so a decimated profile is accepted, while a
+   *   plain `[z,…]` still lines up with the geometry's own points;
    *   a function or `{sample}` `(lonlats, ctx) => number[]|Promise<number[]>` to source them
    *   yourself; `null` disables the whole thing.
    *   Decoding: `encoding` is `'terrarium'`, `'mapbox'`, or a function `(r,g,b,a) => metres`.
@@ -876,6 +933,9 @@ import * as d3 from 'd3';
       this._crops = []; this._off = 0;
       this._zoomA = null; this._zoomB = null; this._armed = null;
       this._demZ = null; this._demFor = null; this._demSeq = 0; this._demLoading = false;
+      // Un profil précalculé apporte sa propre géométrie : elle remplace celle de l'entité
+      // le temps du calcul, sans jamais la modifier - l'entité appartient à la carte.
+      this._trackLines = null; this._linesFor = null;
       this._onResize = () => { if (this._feature && !this._collapsed) this._render(); };
       this._buildDom(element);
       element.style.display = 'none';
@@ -1131,7 +1191,7 @@ import * as d3 from 'd3';
     setFeature(feature) {
       this._feature = feature || null;
       this._crops = []; this._off = 0; this._zoomA = null; this._zoomB = null; this._armed = null;
-      if (!feature) { this._fullSamples = this._samples = null; this._demZ = this._demFor = null; this._clear(); return this; }
+      if (!feature) { this._fullSamples = this._samples = null; this._demZ = this._demFor = null; this._trackLines = this._linesFor = null; this._clear(); return this; }
       this.element.style.display = '';
       this._compute();
       // Before the render, not after: it is _fillFromDem that knows whether a fill is
@@ -1173,7 +1233,7 @@ import * as d3 from 'd3';
       }
       if (patch && ('zoom' in patch || 'exportPng' in patch)) this._updateZoomButtons();
       if (patch && typeof patch.width !== 'undefined' && typeof patch.width === 'number') this.options.width = patch.width;
-      if (patch && 'dem' in patch) { this._demZ = null; this._demFor = null; }
+      if (patch && 'dem' in patch) { this._demZ = null; this._demFor = null; this._trackLines = null; this._linesFor = null; }
       if (this._feature) { this._compute(); this._fillFromDem(this._feature); this._updateZoomButtons(); if (this._collapsed) this._renderTitle(); else this._render(); }
       return this;
     }
@@ -1197,19 +1257,22 @@ import * as d3 from 'd3';
      */
     _fillFromDem(feature) {
       const cfg = demConfig(this.options.dem);
-      if (!cfg || !feature || this._demFor === feature) return;
+      if (!cfg || !feature || this._demFor === feature || this._linesFor === feature) return;
       if (ElevationProfile.featureHasZ(feature)) return;              // the track already carries its Z
       // Canvas decoding needs a browser; a `sample` function does not, and must stay
       // usable where there is no DOM.
       if (!cfg.sample && (typeof Image === 'undefined' || typeof document === 'undefined')) return;
 
       const geom = feature.getGeometry && feature.getGeometry();
-      if (!geom) return;
-      const lines = geomLines(geom);
+      const lines = geom ? geomLines(geom) : [];
       const dataProj = this.options.dataProjection || (this.getMap() && this.getMap().getView().getProjection()) || 'EPSG:3857';
       const lonlats = [];
       for (const seg of lines) for (const c of seg) lonlats.push(toLonLat(c, dataProj));
-      if (!lonlats.length) return;
+      // Un profil précalculé rapporte sa propre géométrie : il lui suffit de savoir DE
+      // QUELLE trace il s'agit. C'est ce qui le rend utilisable sur une entité de tuile
+      // vectorielle, dont les coordonnées sont dans le repère de la tuile et qu'aucune
+      // source échantillonnée ne saurait interroger.
+      if (!lonlats.length && !cfg.track) return;
 
       // Sequence number: a track clicked while another is loading must win, otherwise the
       // slowest response would overwrite the profile on screen.
@@ -1228,6 +1291,7 @@ import * as d3 from 'd3';
 
     /** @private */
     _startFill(cfg, seq, feature, lonlats, dataProj) {
+      if (cfg.track) { this._startTrackFill(cfg, seq, feature, lonlats.length, dataProj); return; }
       if (cfg.sample) {
         // Wrapped in a promise chain so a function that throws synchronously fails the
         // same way as one that rejects - a source that misbehaves must not leave the
@@ -1245,6 +1309,75 @@ import * as d3 from 'd3';
         const zs = ok ? lonlats.map((ll) => sampler.sample(ll[0], ll[1], z)) : null;
         this._demDone(seq, feature, zs, lonlats.length, z, sampler.tiles.size);
       }).catch(() => this._demDone(seq, feature, null, lonlats.length, z, 0));
+    }
+
+    /**
+     * Va chercher un profil déjà calculé, que l'application tient prêt pour cette trace.
+     *
+     * Les dix autres sources échantillonnent un modèle de terrain aux points de la trace.
+     * Celle-ci ne fait rien de tel : elle demande à l'application le profil qu'elle a déjà,
+     * calculé une fois à l'ingestion sur le modèle qu'elle voulait, décimé comme elle
+     * l'entendait. C'est le cas d'une application qui a fait son altimétrie en amont et ne
+     * veut ni la refaire dans le navigateur ni dépendre d'un service au clic.
+     *
+     * La réponse peut prendre deux formes, et elles ne veulent pas dire la même chose :
+     * un tableau de nombres est une altitude par point de la géométrie, qui rejoint le
+     * chemin ordinaire ; un tableau de triplets `[lon, lat, z]` porte SA propre géométrie
+     * et remplace celle de la trace, ce qui est le seul moyen d'accepter un profil décimé.
+     *
+     * @private
+     */
+    _startTrackFill(cfg, seq, feature, expected, dataProj) {
+      const url = trackUrl(cfg.track.url, feature);
+      if (!url) { this._demDone(seq, feature, null, expected, null, 0); return; }
+      Promise.resolve()
+        .then(() => fetch(url, cfg.track.fetchOptions || undefined))
+        .then((r) => { if (!r.ok) throw new Error(String(r.status)); return r.json(); })
+        .then((json) => {
+          const data = cfg.track.parse ? cfg.track.parse(json, feature)
+            : (Array.isArray(json) ? json : (json && json[cfg.track.coords]));
+          this._trackDone(seq, feature, data, expected, dataProj);
+        })
+        // Une trace sans profil répond 404, et c'est un fait, pas une panne : elle retombe
+        // sur le même sort qu'un remplissage manqué.
+        .catch(() => this._demDone(seq, feature, null, expected, null, 0));
+    }
+
+    /**
+     * Adopte un profil précalculé, sous l'une ou l'autre de ses deux formes.
+     *
+     * Un triplet incomplet fait tout refuser, par la même règle que `_demDone` : un profil
+     * auquel il manque des points n'est pas un profil incomplet, c'est un profil faux.
+     *
+     * @fires demload
+     * @private
+     */
+    _trackDone(seq, feature, data, expected, dataProj) {
+      const rate = () => this._demDone(seq, feature, null, expected, null, 0);
+      if (!Array.isArray(data) || !data.length) return rate();
+      // Des nombres : une altitude par point, exactement ce qu'un échantillonneur rend.
+      if (typeof data[0] === 'number') return void this._demDone(seq, feature, data, expected, null, 0);
+
+      if (seq !== this._demSeq || this._feature !== feature) return;   // un clic plus récent a gagné
+      // `isFinite(null)` vaut true - Number(null) est 0 : sans le test de nullité, une
+      // altitude absente passerait pour une altitude au niveau de la mer. Même règle que
+      // `_demDone`, pour la même raison.
+      const fini = (v) => v != null && isFinite(v);
+      const lignes = [];
+      for (const c of data) {
+        if (!c || c.length < 3 || !fini(c[0]) || !fini(c[1]) || !fini(c[2])) return rate();
+        const xy = transform([c[0], c[1]], 'EPSG:4326', dataProj);
+        lignes.push([xy[0], xy[1], c[2]]);
+      }
+      if (lignes.length < 2) return rate();
+
+      this._demLoading = false;
+      this._trackLines = [lignes]; this._linesFor = feature;
+      this._demZ = null; this._demFor = null;
+      this._compute();
+      this._updateZoomButtons();
+      if (!this._collapsed) this._render();
+      this.dispatchEvent({ type: 'demload', ok: true, zoom: null, tiles: 0 });
     }
 
     /**
@@ -1280,14 +1413,18 @@ import * as d3 from 'd3';
     // ---------- computation -------------------------------------------
     _compute() {
       const o = this.options;
-      const geom = this._feature.getGeometry();
-      const lines = geomLines(geom);
+      // Un profil précalculé apporte sa géométrie ; sinon, celle de l'entité.
+      const substitue = this._linesFor === this._feature && this._trackLines;
+      const geom = this._feature.getGeometry && this._feature.getGeometry();
+      const lines = substitue ? this._trackLines : (geom ? geomLines(geom) : []);
       const dataProj = o.dataProjection || (this.getMap() && this.getMap().getView().getProjection()) || 'EPSG:3857';
 
       // Terrain-model elevations, if they were loaded for THIS feature.
       const demZ = (this._demFor === this._feature) ? this._demZ : null;
 
-      const times = extractTimes(this._feature, lines);
+      // Les horodatages sont indexés sur les points de l'ENTITÉ : sur une géométrie
+      // substituée ils tomberaient à côté, et un temps faux vaut moins que pas de temps.
+      const times = substitue ? null : extractTimes(this._feature, lines);
       this._hasTime = !!times;
       const ignoreStops = o.ignoreStops !== false;                   // default: stops are excluded
       const stopSpeed = (o.stopSpeed != null ? o.stopSpeed : 0.5);   // m/s
@@ -1359,18 +1496,56 @@ import * as d3 from 'd3';
      * `nice()` n'est pas appliqué en échelle absolue : il arrondit le domaine vers
      * l'extérieur, donc il fausserait le rapport qu'on vient de fixer.
      */
-    _yScale(s, zpad, innerH) {
-      const o = this.options, bas = s.min - zpad, haut = s.max + zpad;
-      const vs = typeof o.verticalScale === 'number' ? o.verticalScale : 0;
-      if (!(vs > 0)) {
-        this._vScale = null;
-        return d3.scaleLinear().domain([bas, haut]).range([innerH, 0]).nice();
-      }
+    _yScale(s, zpad, innerH, innerW) {
+      const bas = s.min - zpad, haut = s.max + zpad;
       const cm = innerH / this._pxPerCm();            // hauteur du graphe, en centimètres
+      const cmH = innerW / this._pxPerCm();           // largeur du graphe, en centimètres
+      // Le rapport entre les deux axes, quel que soit le mode : c'est la grandeur qu'on
+      // tient fixe sous `{ exaggeration }`, et celle qui dérive librement en `'auto'`.
+      // La publier partout est le seul moyen de voir la différence plutôt que d'y croire.
+      const rapport = (etendue) => (cmH > 0 && etendue > 0) ? (s.distance / cmH) / (etendue / cm) : null;
+
+      const vs = this._verticalScaleFor(s, innerW);
+      if (!(vs > 0)) {
+        // `'auto'` : la hauteur est remplie, donc c'est l'amplitude qui décide de tout.
+        // `nice()` arrondit le domaine vers l'extérieur, d'où la lecture APRÈS coup.
+        const echelle = d3.scaleLinear().domain([bas, haut]).range([innerH, 0]).nice();
+        const dom = echelle.domain();
+        this._vScale = null;                          // aucune échelle absolue demandée
+        this._vExaggeration = rapport(dom[1] - dom[0]);
+        return echelle;
+      }
       const etendue = Math.max(vs * cm, haut - bas);  // jamais moins qu'il n'en faut
       const milieu = (bas + haut) / 2;
       this._vScale = etendue / cm;                    // m/cm effectivement appliqués
+      // Sous le plancher, le rapport retombe sous celui demandé : c'est la seule façon de
+      // savoir que c'est arrivé.
+      this._vExaggeration = rapport(etendue);
       return d3.scaleLinear().domain([milieu - etendue / 2, milieu + etendue / 2]).range([innerH, 0]);
+    }
+
+    /**
+     * Les mètres par centimètre demandés, sous l'une ou l'autre forme de `verticalScale`.
+     *
+     * Une échelle absolue rend les AMPLITUDES comparables, pas les pentes : l'axe
+     * horizontal s'étire toujours sur toute la trace, si bien qu'une même pente de 5 %
+     * paraît trois fois plus raide sur une boucle de 3 km que sur une traversée de 30. Une
+     * exagération fixe le RAPPORT entre les deux axes : la pente lue sur le dessin est
+     * alors la pente réelle, multipliée par un facteur constant d'une trace à l'autre.
+     *
+     * Elle se calcule ici et pas chez l'appelant parce qu'elle demande deux choses que lui
+     * n'a pas : la largeur du graphe une fois les marges retirées, et la distance
+     * réellement affichée - celle du recadrage A/B en cours, non celle de la trace.
+     *
+     * @private
+     */
+    _verticalScaleFor(s, innerW) {
+      const v = this.options.verticalScale;
+      if (typeof v === 'number') return v;
+      const ex = (v && typeof v === 'object') ? Number(v.exaggeration) : 0;
+      if (!(ex > 0) || !(s.distance > 0) || !(innerW > 0)) return 0;
+      const cm = innerW / this._pxPerCm();            // largeur du graphe, en centimètres
+      return (s.distance / cm) / ex;                  // horizontale ÷ exagération
     }
     _statsOf(samples, fromTotal) {
       let ascent = 0, descent = 0, zmin = Infinity, zmax = -Infinity, maxAbs = 0;
@@ -1465,17 +1640,80 @@ import * as d3 from 'd3';
      * is skipped while collapsed, so without a separate entry point the title would keep
      * naming the previous track after a change of feature.
      */
+    /**
+     * Cette trace a-t-elle une altitude, d'où qu'elle vienne ?
+     *
+     * Trois sources possibles, et une seule suffit : le Z de la géométrie, les altitudes
+     * rapportées par un modèle de terrain, ou le profil précalculé d'une source `track`.
+     * Aucune des trois, et il n'y a rien à dessiner - ce qui ne veut pas dire zéro.
+     *
+     * @private
+     */
+    _hasElevation() {
+      const f = this._feature;
+      if (!f) return false;
+      if (ElevationProfile.featureHasZ(f)) return true;
+      if (this._demFor === f && this._demZ) return true;
+      if (this._linesFor === f && this._trackLines) return true;
+      return false;
+    }
+
+    /**
+     * Ce qui prend la place du graphe quand la trace n'a aucune altitude.
+     *
+     * Même forme que le spinner, et pour la même raison : la hauteur du graphe est tenue,
+     * si bien que le panneau ne saute pas si un profil finit par arriver. Le titre reste,
+     * lui : c'est la trace cliquée, et l'utilisateur a besoin de savoir laquelle.
+     *
+     * @private
+     */
+    _renderNoElevation() {
+      if (!this.options.showWithoutElevation) { this.element.style.display = 'none'; return; }
+      this.element.style.display = '';
+      this._applyTheme();
+      this._applyPlacement();
+      this._renderHeader(true);
+      const H = typeof this.options.height === 'number' ? this.options.height : 180;
+      this._body.innerHTML = '';
+      const box = document.createElement('div');
+      box.className = 'oep-noelev';
+      box.style.height = `${H}px`;
+      box.setAttribute('role', 'status');
+      box.textContent = this.options.labels.noElevation;
+      this._body.appendChild(box);
+      this._clearFocus();
+    }
+
+    /**
+     * La première propriété qui répond, parmi celles proposées.
+     *
+     * Un nom de propriété unique reste un nom de propriété unique ; une liste est essayée
+     * dans l'ordre. `garde` filtre ce qu'on accepte : n'importe quelle valeur non vide pour
+     * un titre, une URL véritable pour un lien - sans quoi une propriété `url` contenant
+     * autre chose ferait un lien mort plutôt que pas de lien du tout.
+     *
+     * @private
+     */
+    _pickProperty(f, spec, garde) {
+      if (!spec || !f || !f.get) return null;
+      for (const cle of (Array.isArray(spec) ? spec : [spec])) {
+        const v = f.get(cle);
+        if (v != null && v !== '' && (!garde || garde(v))) return v;
+      }
+      return null;
+    }
+
     _renderTitle() {
       const o = this.options, f = this._feature;
       if (!f) return;
-      const name = (f.get && f.get(o.titleProperty)) || 'Profil';
-      const linkUrl = o.titleLink && f.get && f.get(o.titleLink);
+      const name = this._pickProperty(f, o.titleProperty) || o.labels.untitled;
+      const linkUrl = this._pickProperty(f, o.titleLink, isUrl);
       if (isUrl(linkUrl)) this._titleEl.innerHTML = `<a href="${esc(linkUrl)}" target="_blank" rel="noopener">${esc(name)}</a>`;
       else this._titleEl.textContent = name;
       this._titleEl.setAttribute('title', name);
     }
 
-    _renderHeader() {
+    _renderHeader(sansAltimetrie) {
       const o = this.options, s = this._stats, f = this._feature;
       this._renderTitle();
       // While the elevations are still unknown, every figure would read zero: a D+ of 0 m
@@ -1489,7 +1727,10 @@ import * as d3 from 'd3';
       const html = [], text = [];
       o.headerItems.forEach((it) => {
         if (typeof it === 'string') {
-          if (it === 'distance') { html.push(`<b>${fmtDistance(s.distance, o.units)}</b>`); text.push(fmtDistance(s.distance, o.units)); }
+          // Sans altitude, il reste ce que la géométrie sait dire : la longueur, la durée.
+          // Le dénivelé et les altitudes extrêmes, eux, vaudraient zéro - on les tait.
+          if (sansAltimetrie && (it === 'ascent' || it === 'descent' || it === 'min' || it === 'max' || it === 'minmax')) return;
+          if (it === 'distance') { if (!(s && s.distance > 0)) return; html.push(`<b>${fmtDistance(s.distance, o.units)}</b>`); text.push(fmtDistance(s.distance, o.units)); }
           else if (it === 'ascent') { html.push(`<span class="oep-up">${o.labels.ascent} ${fmtElevation(s.ascent, o.units)}</span>`); text.push(`${o.labels.ascent} ${fmtElevation(s.ascent, o.units)}`); }
           else if (it === 'descent') { html.push(`<span class="oep-down">${o.labels.descent} ${fmtElevation(s.descent, o.units)}</span>`); text.push(`${o.labels.descent} ${fmtElevation(s.descent, o.units)}`); }
           else if (it === 'min') { html.push(fmtElevation(s.min, o.units)); text.push(fmtElevation(s.min, o.units)); }
@@ -1544,6 +1785,10 @@ import * as d3 from 'd3';
     // ---------- rendering ---------------------------------------------
     _render() {
       const o = this.options, s = this._stats, data = this._samples;
+      // Aucune altitude par aucune voie, et plus rien en chemin : le graphe n'a pas lieu
+      // d'être. Le tracer quand même poserait une ligne plate au niveau zéro sous un D+ de
+      // 0 m, ce qui n'est pas un chiffre manquant mais un chiffre faux.
+      if (!this._demLoading && !this._hasElevation()) { this._renderNoElevation(); return; }
       if (!data || !data.length) return;
       this._applyTheme();
       const mobile = this._applyPlacement();
@@ -1574,7 +1819,7 @@ import * as d3 from 'd3';
 
       const x = d3.scaleLinear().domain([0, s.distance]).range([0, innerW]);
       const zpad = (s.max - s.min) * 0.1 || 10;
-      const y = this._yScale(s, zpad, innerH);
+      const y = this._yScale(s, zpad, innerH, innerW);
       this._x = x; this._y = y; this._dims = { innerW, innerH };
 
       if (o.grid) g.append('g').attr('class', 'oep-grid').call(d3.axisLeft(y).ticks(yTicks).tickSize(-innerW).tickFormat(''));
@@ -2009,6 +2254,9 @@ import * as d3 from 'd3';
   ElevationProfile.DEM_PRESETS = DEM_PRESETS;
   ElevationProfile.DemSampler = DemSampler;
   ElevationProfile.POSITIONS = POSITIONS;
-  ElevationProfile.version = '0.6.0';
+  // Stamped at build time from package.json - see rollup.config.mjs, which fails the build
+  // if this placeholder ever stops matching. Read from the source rather than the bundle,
+  // it says just that: a development copy, of no released version.
+  ElevationProfile.version = '0.0.0-dev';
 
 export default ElevationProfile;
