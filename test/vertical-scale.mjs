@@ -92,6 +92,79 @@ check('exaggeration: a 5 % ramp is drawn at the same angle whatever the length',
 check('exaggeration: that angle is the real 5 % gradient times six',
   Math.abs(a1 - 0.05 * 6) < 0.005);
 
+// ---- 3 bis. the axis never dives below sea level -------------------------
+// Centring the window used to hollow out space under the track: a wide scale - what a
+// fixed exaggeration asks of a long track - pushed the axis to -900 m on a mountain
+// profile. The extra room belongs above.
+const domaineDe = (verticalScale, geom) => {
+  const p = new Profile({ dem: null, smoothing: 0, verticalScale, width: 800, height: 300 });
+  p.setFeature(featureOf(geom));
+  return p._yScale(p.getStats(), 5, 250, 728).domain();
+};
+let d = domaineDe({ exaggeration: 6 }, ramp(118, 2265));      // a GR738-shaped traverse
+check('the axis starts at zero, not below', d[0] === 0);
+check('and the track still fits inside', d[1] >= 600 + 2265);
+
+// A track that genuinely runs below sea level keeps its own floor: a depression is a
+// fact, a negative elevation invented by the scale is not.
+const creux = (() => {
+  const cs = [];
+  for (let i = 0; i < 200; i++) {
+    const f = i / 199, ll = fromLonLat([6.0 + f * (40 / 78.8), 45.0]);
+    cs.push([ll[0], ll[1], -400 + f * 100]);
+  }
+  return { getType: () => 'LineString', getCoordinates: () => cs,
+           getClosestPoint: () => [0, 0], getExtent: () => [0, 0, 1, 1] };
+})();
+d = domaineDe({ exaggeration: 6 }, creux);
+check('a track below sea level keeps a negative floor', d[0] <= -400);
+
+// A short track, where the window still fits centred, is left centred.
+d = domaineDe(50, ramp(10, 300));
+check('a window that fits is still centred', d[0] > 0);
+
+// ---- 3 ter. a CAP: fill the height, but never steeper than N ---------------
+// A fixed exaggeration cannot serve a corpus that holds both a 2.5 km loop and a 680 km
+// traverse: whatever the factor, one of the two ends up occupying a tenth of the frame.
+// A cap leaves filling the height alone and only reins in the absurd.
+const capDe = (n, geom) => {
+  const p = new Profile({ dem: null, smoothing: 0, verticalScale: { maxExaggeration: n },
+                          width: 1160, height: 300 });
+  p.setFeature(featureOf(geom));
+  const d = p._yScale(p.getStats(), 5, 250, 1088).domain();
+  const st = p.getStats();
+  return { part: (st.max - st.min) / (d[1] - d[0]), ex: p._vExaggeration, bas: d[0] };
+};
+const autoDe = (geom) => {
+  const p = new Profile({ dem: null, smoothing: 0, verticalScale: 'auto', width: 1160, height: 300 });
+  p.setFeature(featureOf(geom));
+  const d = p._yScale(p.getStats(), 5, 250, 1088).domain();
+  const st = p.getStats();
+  return { part: (st.max - st.min) / (d[1] - d[0]), ex: p._vExaggeration };
+};
+// A track whose natural exaggeration is already under the cap is left exactly as 'auto'.
+const moyenne = ramp(23, 600);
+check('cap: a track under the cap is untouched',
+  Math.abs(capDe(20, moyenne).part - autoDe(moyenne).part) < 0.001);
+check('cap: and it still fills the height', capDe(20, moyenne).part > 0.8);
+
+// A very long, gently sloping track: 'auto' would draw a 0.2 % gradient as a wall.
+const tres_longue = ramp(680, 1400);
+check('cap: auto alone would exaggerate absurdly', autoDe(tres_longue).ex > 50);
+check('cap: the cap holds it at the requested ratio',
+  Math.abs(capDe(20, tres_longue).ex - 20) < 0.5);
+check('cap: a lower cap flattens further', capDe(12, tres_longue).part < capDe(20, tres_longue).part);
+check('cap: the axis still starts at the floor', capDe(20, tres_longue).bas === 0);
+
+// Nonsense is ignored rather than obeyed, as elsewhere.
+for (const [nom, v] of [['zero', 0], ['negative', -4], ['not a number', 'twenty']]) {
+  const p = new Profile({ dem: null, smoothing: 0, verticalScale: { maxExaggeration: v },
+                          width: 1160, height: 300 });
+  p.setFeature(featureOf(tres_longue));
+  p._yScale(p.getStats(), 5, 250, 1088);
+  check(`cap: ${nom} falls back on 'auto'`, p._vScale === null && p._vExaggeration > 50);
+}
+
 // ---- 4. the floor applies here too ---------------------------------------
 // A wall: 3000 m over 2 km cannot be drawn at 6x in 250 px, so the ratio drops.
 p = profileOf({ exaggeration: 6 }, ramp(2, 3000));

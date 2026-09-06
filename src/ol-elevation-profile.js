@@ -114,7 +114,8 @@ import * as d3 from 'd3';
     yTicks: null,
     verticalScale: 'auto',        // 'auto' : le profil remplit la hauteur ;
                                   // un nombre : mètres par centimètre physique ;
-                                  // { exaggeration } : rapport fixe vertical/horizontal
+                                  // { exaggeration } : rapport fixe vertical/horizontal ;
+                                  // { maxExaggeration } : 'auto' sans dépasser ce rapport
     show: 'click',
     showWithoutElevation: true,   // trace sans Z, et aucun MNT n'a pu en fournir :
                                   // le panneau paraît quand même, avec un message
@@ -836,16 +837,22 @@ import * as d3 from 'd3';
    * @property {number} [smoothing=0] Elevation smoothing window, in METERS (0 = none).
    * @property {?number} [xTicks=null] X axis ticks (null = auto from width).
    * @property {?number} [yTicks=null] Y axis ticks (null = auto from height).
-   * @property {('auto'|number|{exaggeration:number})} [verticalScale='auto'] `'auto'`: the
+   * @property {('auto'|number|{exaggeration:number}|{maxExaggeration:number})} [verticalScale='auto'] `'auto'`: the
    *   profile fills the height, which is legible but changes scale from one track to the
    *   next, so a 2 % ramp looks like a wall and two profiles cannot be compared. A number
    *   fixes the metres covered per physical centimetre, which makes RANGES comparable.
    *   `{exaggeration}` fixes the ratio between the two axes instead, which makes SLOPES
    *   comparable: the gradient read off the chart is the real one, multiplied by the same
    *   factor on every track, and the control recomputes it per track and per A/B crop.
-   *   Either form is a **floor**, not a cage: a track whose range exceeds what the height
-   *   can show would spill out of the frame, which is worse than losing comparability, so
-   *   the scale then widens silently, nothing being drawn on the chart to say so.
+   *   `{maxExaggeration}` keeps `'auto'` — the height is filled, which reads best — and
+   *   only reins in the absurd: a short, gently sloping track whose 2 % ramp would
+   *   otherwise be drawn as a wall. A track already under the cap is untouched, so unlike
+   *   a fixed exaggeration it never flattens a mountain traverse to fit a rule.
+   *   A number or `{exaggeration}` is a **floor**, not a cage: a track whose range exceeds
+   *   what the height can show would spill out of the frame, which is worse than losing
+   *   comparability, so the scale then widens silently, nothing being drawn on the chart
+   *   to say so. The extra room the scale asks for is added ABOVE the track, never below:
+   *   centring it would push the axis under sea level on a mountain profile.
    * @property {'click'|'mouseover'} [show='click'] How a track is selected on the map.
    * @property {boolean} [showWithoutElevation=true] What to do with a track that ends up
    *   with no elevation at all: none in its geometry, and none the terrain model could
@@ -1505,23 +1512,44 @@ import * as d3 from 'd3';
       // La publier partout est le seul moyen de voir la différence plutôt que d'y croire.
       const rapport = (etendue) => (cmH > 0 && etendue > 0) ? (s.distance / cmH) / (etendue / cm) : null;
 
-      const vs = this._verticalScaleFor(s, innerW);
+      let vs = this._verticalScaleFor(s, innerW);
       if (!(vs > 0)) {
         // `'auto'` : la hauteur est remplie, donc c'est l'amplitude qui décide de tout.
         // `nice()` arrondit le domaine vers l'extérieur, d'où la lecture APRÈS coup.
         const echelle = d3.scaleLinear().domain([bas, haut]).range([innerH, 0]).nice();
         const dom = echelle.domain();
-        this._vScale = null;                          // aucune échelle absolue demandée
-        this._vExaggeration = rapport(dom[1] - dom[0]);
-        return echelle;
+        const obtenu = rapport(dom[1] - dom[0]);
+        // Un PLAFOND d'exagération, s'il en est demandé un. Remplir la hauteur est ce
+        // qui se lit le mieux, mais sur une trace courte et peu accidentée cela dresse
+        // une pente de 2 % en muraille. Le plafond n'intervient que là : quand le
+        // remplissage dépasse le rapport permis, on élargit l'échelle jusqu'à lui. Une
+        // trace assez accidentée pour rester en dessous n'est jamais aplatie, ce qu'une
+        // exagération FIXE lui imposerait — à 680 km d'une traversée, elle n'occuperait
+        // plus qu'un dixième du cadre.
+        const plafond = this._plafondExageration();
+        if (!(plafond > 0) || obtenu == null || obtenu <= plafond) {
+          this._vScale = null;                        // aucune échelle absolue demandée
+          this._vExaggeration = obtenu;
+          return echelle;
+        }
+        vs = (s.distance / cmH) / plafond;            // l'échelle qui donne exactement le plafond
       }
       const etendue = Math.max(vs * cm, haut - bas);  // jamais moins qu'il n'en faut
-      const milieu = (bas + haut) / 2;
       this._vScale = etendue / cm;                    // m/cm effectivement appliqués
       // Sous le plancher, le rapport retombe sous celui demandé : c'est la seule façon de
       // savoir que c'est arrivé.
       this._vExaggeration = rapport(etendue);
-      return d3.scaleLinear().domain([milieu - etendue / 2, milieu + etendue / 2]).range([innerH, 0]);
+
+      // La marge que l'échelle impose se place AU-DESSUS, pas de part et d'autre.
+      // Centrer la fenêtre creuse sous la trace : une échelle large - ce que demande
+      // une exagération fixe sur une trace longue - fait alors descendre l'axe sous le
+      // niveau de la mer, et on lit « -900 m » sur un profil de montagne. Le plancher
+      // est donc zéro, ou le point le plus bas de la trace s'il passe dessous : une
+      // dépression existe, une altitude négative inventée, non.
+      const plancher = Math.min(0, bas);
+      let y0 = (bas + haut) / 2 - etendue / 2;        // le centrage, quand il tient
+      if (y0 < plancher) y0 = plancher;
+      return d3.scaleLinear().domain([y0, y0 + etendue]).range([innerH, 0]);
     }
 
     /**
@@ -1539,6 +1567,13 @@ import * as d3 from 'd3';
      *
      * @private
      */
+    /** Le rapport à ne pas dépasser, `0` s'il n'en est pas demandé. @private */
+    _plafondExageration() {
+      const v = this.options.verticalScale;
+      const n = (v && typeof v === 'object') ? Number(v.maxExaggeration) : 0;
+      return n > 0 ? n : 0;
+    }
+
     _verticalScaleFor(s, innerW) {
       const v = this.options.verticalScale;
       if (typeof v === 'number') return v;
