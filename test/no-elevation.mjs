@@ -31,6 +31,7 @@ const panneau = (p) => ({
   message: (p.element.querySelector('.oep-noelev') || {}).textContent || null,
   titre: (p.element.querySelector('.oep-title') || {}).textContent || null,
   stats: (p.element.querySelector('.oep-stats') || {}).textContent || '',
+  legende: (p.element.querySelector('.oep-legend') || {}).textContent || '',
   graphe: !!p.element.querySelector('.oep-body svg')
 });
 
@@ -44,6 +45,9 @@ check('no Z: no chart is drawn', !v.graphe);
 check('no Z: the track is still named', v.titre === 'Sans altitude');
 check('no Z: no D+ is announced', !/D\+/.test(v.stats));
 check('no Z: the distance, which the geometry does know, is kept', /km/.test(v.stats));
+// A slope legend with no elevation legends nothing: it would announce classes no line
+// carries, under a panel that says it has no profile.
+check('no Z: no slope legend either', v.legende === '');
 
 // ---- 2. the option hides the panel instead --------------------------------
 p = new Profile({ dem: null, showWithoutElevation: false });

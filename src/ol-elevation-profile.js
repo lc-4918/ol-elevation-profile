@@ -1748,7 +1748,9 @@ import * as d3 from 'd3';
       this._statsEl.setAttribute('title', text.join('  ·  '));
 
       this._legendEl.innerHTML = '';
-      if (o.slope && o.slopeLegend) {
+      // Une légende de pentes sans altitude ne légende rien : elle annoncerait des
+      // classes qu'aucun trait ne porte, sous un panneau qui dit n'avoir pas de profil.
+      if (o.slope && o.slopeLegend && !sansAltimetrie) {
         const sc = this._slopeScale();
         for (let idx = 0; idx <= sc.maxIdx; idx++) {
           const color = sc.colorByIndex(idx);
