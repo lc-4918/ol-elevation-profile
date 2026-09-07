@@ -232,6 +232,27 @@ import * as d3 from 'd3';
   const distAxisLabel = (units) => units === 'imperial' ? 'mi' : 'km';
   const distAxisScale = (units) => units === 'imperial' ? 1609.344 : 1000;
 
+  /**
+   * Le plus petit pas ROND au moins égal à la valeur brute : 1, 2, 2,5 ou 5 fois une
+   * puissance de dix. C'est l'échelle de graduations que lit un randonneur — 200 m, pas
+   * 187 — et elle décide aussi du sommet de l'axe, arrondi au pas au-dessus de la trace :
+   * une altitude maximale de 1 149 m sous un pas de 200 finit sur une ligne à 1 200.
+   */
+  const pasRond = (brut) => {
+    if (!(brut > 0)) return 1;
+    const p = Math.pow(10, Math.floor(Math.log10(brut)));
+    for (const m of [1, 2, 2.5, 5]) if (brut <= m * p) return m * p;
+    return 10 * p;
+  };
+
+  /** Hauteur de graphe sous laquelle l'axe des Y n'a plus assez de place pour trois
+   *  graduations lisibles : le plafond d'exagération ne descend pas en dessous. */
+  const HAUTEUR_MIN = 70;
+
+  /** Le cadre ne dépasse pas ce multiple de l'amplitude de la trace : au-delà, le dessin
+   *  n'est plus qu'un trait au bas d'un cadre vide. */
+  const CADRE_MAX = 4;
+
   function buildElement(o) {
     const el = document.createElement('div');
     el.className = 'ol-elevation-profile ol-unselectable ol-control'
@@ -845,9 +866,12 @@ import * as d3 from 'd3';
    *   comparable: the gradient read off the chart is the real one, multiplied by the same
    *   factor on every track, and the control recomputes it per track and per A/B crop.
    *   `{maxExaggeration}` keeps `'auto'` — the height is filled, which reads best — and
-   *   only reins in the absurd: a short, gently sloping track whose 2 % ramp would
+   *   only reins in the absurd: a long, gently sloping track whose 0.2 % gradient would
    *   otherwise be drawn as a wall. A track already under the cap is untouched, so unlike
-   *   a fixed exaggeration it never flattens a mountain traverse to fit a rule.
+   *   a fixed exaggeration it never flattens a mountain traverse to fit a rule. Under the
+   *   cap it is the chart HEIGHT that gives way, not the axis: the panel shrinks to what
+   *   the drawing needs and the axis stops on the first round graduation above the summit,
+   *   the window never exceeding four times the track's range nor the chart 70 px.
    *   A number or `{exaggeration}` is a **floor**, not a cage: a track whose range exceeds
    *   what the height can show would spill out of the frame, which is worse than losing
    *   comparability, so the scale then widens silently, nothing being drawn on the chart
@@ -1487,58 +1511,73 @@ import * as d3 from 'd3';
     }
 
     /**
-     * Échelle verticale du graphe.
+     * Échelle verticale du graphe, et la hauteur qu'il lui faut.
      *
-     * En `'auto'`, le profil remplit la hauteur : c'est lisible, mais l'échelle change d'une
-     * trace à l'autre, si bien qu'une pente de 2 % y prend l'allure d'un mur et que deux
-     * profils ne se comparent pas. Un nombre fixe au contraire les mètres couverts par
-     * centimètre physique.
+     * Trois régimes, et un seul aiguillage :
+     * - `'auto'` : le profil remplit la hauteur. C'est lisible, mais l'échelle change d'une
+     *   trace à l'autre, si bien qu'une pente de 2 % y prend l'allure d'un mur et que deux
+     *   profils ne se comparent pas.
+     * - un nombre, ou `{ exaggeration }` : une échelle ABSOLUE, un contrat — voir
+     *   `_fenetreAbsolue`. Ni la hauteur ni le domaine n'y sont retouchés.
+     * - `{ maxExaggeration }` : un plafond, une commodité — voir `_fenetrePlafonnee`.
+     *   C'est là que la hauteur du panneau devient variable.
      *
-     * La valeur demandée est un **plancher**, non un carcan : une trace dont l'amplitude
-     * dépasse ce que la hauteur peut montrer déborderait du cadre, ce qui est pire que de
-     * perdre la comparabilité. Le graphe n'en dit rien : l'échelle n'est pas une donnée de
-     * la trace et n'a pas à encombrer le dessin ; l'échelle réellement appliquée est
-     * seulement publiée dans `_vScale`, à qui veut la connaître.
-     *
-     * `nice()` n'est pas appliqué en échelle absolue : il arrondit le domaine vers
-     * l'extérieur, donc il fausserait le rapport qu'on vient de fixer.
+     * Le graphe ne dit rien de tout cela : l'échelle n'est pas une donnée de la trace et
+     * n'a pas à encombrer le dessin ; l'échelle réellement appliquée est seulement publiée
+     * dans `_vScale`, et le rapport obtenu dans `_vExaggeration`, à qui veut les connaître.
+     * La hauteur retenue passe par `_chartHeight`, et les graduations imposées, s'il y en
+     * a, par `_yTicks` : le rendu les lit avant de dimensionner son SVG.
      */
-    _yScale(s, zpad, innerH, innerW) {
+    _yScale(s, zpad, innerHMax, innerW) {
       const bas = s.min - zpad, haut = s.max + zpad;
-      const cm = innerH / this._pxPerCm();            // hauteur du graphe, en centimètres
-      const cmH = innerW / this._pxPerCm();           // largeur du graphe, en centimètres
+      const pxCm = this._pxPerCm();
+      const cmH = innerW / pxCm;                      // largeur du graphe, en centimètres
       // Le rapport entre les deux axes, quel que soit le mode : c'est la grandeur qu'on
       // tient fixe sous `{ exaggeration }`, et celle qui dérive librement en `'auto'`.
       // La publier partout est le seul moyen de voir la différence plutôt que d'y croire.
-      const rapport = (etendue) => (cmH > 0 && etendue > 0) ? (s.distance / cmH) / (etendue / cm) : null;
+      const rapport = (etendue, h) => (cmH > 0 && etendue > 0 && h > 0)
+        ? (s.distance / cmH) / (etendue / (h / pxCm)) : null;
+      // Ce que le rendu doit savoir : la hauteur retenue, et les graduations imposées.
+      this._chartHeight = innerHMax;
+      this._yTicks = null;
 
-      let vs = this._verticalScaleFor(s, innerW);
-      if (!(vs > 0)) {
-        // `'auto'` : la hauteur est remplie, donc c'est l'amplitude qui décide de tout.
-        // `nice()` arrondit le domaine vers l'extérieur, d'où la lecture APRÈS coup.
-        const echelle = d3.scaleLinear().domain([bas, haut]).range([innerH, 0]).nice();
-        const dom = echelle.domain();
-        const obtenu = rapport(dom[1] - dom[0]);
-        // Un PLAFOND d'exagération, s'il en est demandé un. Remplir la hauteur est ce
-        // qui se lit le mieux, mais sur une trace courte et peu accidentée cela dresse
-        // une pente de 2 % en muraille. Le plafond n'intervient que là : quand le
-        // remplissage dépasse le rapport permis, on élargit l'échelle jusqu'à lui. Une
-        // trace assez accidentée pour rester en dessous n'est jamais aplatie, ce qu'une
-        // exagération FIXE lui imposerait — à 680 km d'une traversée, elle n'occuperait
-        // plus qu'un dixième du cadre.
-        const plafond = this._plafondExageration();
-        if (!(plafond > 0) || obtenu == null || obtenu <= plafond) {
-          this._vScale = null;                        // aucune échelle absolue demandée
-          this._vExaggeration = obtenu;
-          return echelle;
-        }
-        vs = (s.distance / cmH) / plafond;            // l'échelle qui donne exactement le plafond
+      const vs = this._verticalScaleFor(s, innerW);
+      if (vs > 0) return this._fenetreAbsolue(vs, bas, haut, innerHMax, pxCm, rapport);
+
+      // `'auto'` : la hauteur est remplie, donc c'est l'amplitude qui décide de tout.
+      // `nice()` arrondit le domaine vers l'extérieur, d'où la lecture APRÈS coup.
+      const echelle = d3.scaleLinear().domain([bas, haut]).range([innerHMax, 0]).nice();
+      const dom = echelle.domain();
+      const obtenu = rapport(dom[1] - dom[0], innerHMax);
+      const plafond = this._plafondExageration();
+      if (!(plafond > 0) || obtenu == null || obtenu <= plafond) {
+        this._vScale = null;                          // aucune échelle absolue demandée
+        this._vExaggeration = obtenu;
+        return echelle;
       }
+      return this._fenetrePlafonnee(s, innerHMax, innerW, pxCm, cmH, plafond, rapport);
+    }
+
+    /**
+     * La fenêtre sous une échelle ABSOLUE — un nombre, ou `{ exaggeration }`.
+     *
+     * Une valeur demandée est un CONTRAT : les mètres par centimètre sont ceux-là, et deux
+     * profils se comparent à la règle. La hauteur du panneau ne s'y touche donc pas, et le
+     * domaine ne s'arrondit pas — arrondir fausserait le rapport qu'on vient de fixer.
+     *
+     * La valeur reste un plancher, non un carcan : une trace dont l'amplitude dépasse ce
+     * que la hauteur peut montrer déborderait du cadre, ce qui est pire que de perdre la
+     * comparabilité.
+     *
+     * @private
+     */
+    _fenetreAbsolue(vs, bas, haut, innerH, pxCm, rapport) {
+      const cm = innerH / pxCm;                       // hauteur du graphe, en centimètres
       const etendue = Math.max(vs * cm, haut - bas);  // jamais moins qu'il n'en faut
       this._vScale = etendue / cm;                    // m/cm effectivement appliqués
       // Sous le plancher, le rapport retombe sous celui demandé : c'est la seule façon de
       // savoir que c'est arrivé.
-      this._vExaggeration = rapport(etendue);
+      this._vExaggeration = rapport(etendue, innerH);
 
       // La marge que l'échelle impose se place AU-DESSUS, pas de part et d'autre.
       // Centrer la fenêtre creuse sous la trace : une échelle large - ce que demande
@@ -1550,6 +1589,74 @@ import * as d3 from 'd3';
       let y0 = (bas + haut) / 2 - etendue / 2;        // le centrage, quand il tient
       if (y0 < plancher) y0 = plancher;
       return d3.scaleLinear().domain([y0, y0 + etendue]).range([innerH, 0]);
+    }
+
+    /**
+     * La fenêtre sous un PLAFOND d'exagération : c'est la HAUTEUR qui plie, pas l'axe.
+     *
+     * Le plafond disait quelque chose de juste — remplir la hauteur dresse une pente de
+     * 2 % en muraille — mais il l'obtenait en gonflant le domaine, ce qui est absurde sur
+     * une trace longue : mesuré sur le corpus, un GR de 1 107 km culminant à 2 638 m
+     * recevait un axe de 0 à 12 000 m, et une traversée de 296 km culminant à 119 m un axe
+     * de 0 à 3 000. Le dessin était juste ; le panneau était vide à quatre-vingt-quinze
+     * pour cent, et l'axe ne parlait plus du terrain.
+     *
+     * Or à échelle imposée, le dessin ne dépend PAS de la hauteur du graphe : ses mètres
+     * par pixel sont fixés, la trace occupe les mêmes pixels, et tout ce que la hauteur
+     * ajoute est du vide au-dessus. On la retire donc. Le panneau se réduit, le dessin ne
+     * bouge pas, et l'axe s'arrête juste au-dessus de la trace, sur une graduation ronde.
+     *
+     * Deux garde-fous, dans cet ordre :
+     * - le cadre ne dépasse pas `CADRE_MAX` fois l'amplitude de la trace, sans quoi une
+     *   trace plate resterait un trait au bas d'un cadre vide ;
+     * - le graphe ne descend pas sous `HAUTEUR_MIN` pixels, sous quoi l'axe n'a plus la
+     *   place de trois graduations.
+     * Quand les deux se contredisent — une trace longue ET plate — c'est le premier qui
+     * l'emporte et l'exagération monte au-dessus du plafond : c'est le seul moyen d'avoir
+     * à la fois un panneau lisible et un axe qui parle du terrain. `_vExaggeration` le
+     * dit, comme partout ici.
+     *
+     * @private
+     */
+    _fenetrePlafonnee(s, innerHMax, innerW, pxCm, cmH, plafond, rapport) {
+      const vs = (s.distance / cmH) / plafond;        // l'échelle qui donne exactement le plafond
+      const mParPxPlafond = vs / pxCm;
+      const hMin = Math.min(HAUTEUR_MIN, innerHMax);
+      // L'amplitude NUE, sans la marge de dix pour cent que prend `'auto'` : ici c'est
+      // l'arrondi au pas qui fait la marge, et la doubler poussait le sommet une
+      // graduation trop haut — 1 400 m au-dessus d'une trace culminant à 1 149.
+      const amplitude = Math.max(s.max - s.min, 1e-6);
+      // Un plancher d'altitude à zéro, ou au point le plus bas s'il passe dessous : une
+      // dépression existe, une altitude négative inventée par la marge, non.
+      const plancher = Math.min(0, s.min);
+
+      let etendue = Math.max(amplitude, hMin * mParPxPlafond);
+      etendue = Math.max(amplitude, Math.min(etendue, CADRE_MAX * amplitude));
+      let hauteur = etendue / mParPxPlafond;
+      // Le cadre a mordu avant la hauteur minimale : on garde la hauteur et on laisse
+      // l'exagération dépasser le plafond, plutôt qu'un graphe de quarante pixels.
+      let mParPx = mParPxPlafond;
+      if (hauteur < hMin) { hauteur = hMin; mParPx = etendue / hMin; }
+
+      // Le nombre de graduations que la hauteur peut porter, une par seize pixels : c'est
+      // ce qui donne le pas de 200 m qu'appelle une trace culminant à 1 149.
+      const cible = Math.max(3, Math.min(8, Math.round(hauteur / 16)));
+      const pas = pasRond(etendue / cible);
+      let y0 = (s.min + s.max) / 2 - etendue / 2;
+      if (y0 < plancher) y0 = plancher;
+      const base = Math.floor(y0 / pas) * pas;
+      const sommet = base + Math.ceil((y0 + etendue - base) / pas) * pas;
+      etendue = sommet - base;
+
+      // La hauteur suit le domaine arrondi, à échelle inchangée, dans les bornes.
+      const innerH = Math.round(Math.max(hMin, Math.min(innerHMax, etendue / mParPx)));
+      this._chartHeight = innerH;
+      this._vScale = etendue / (innerH / pxCm);
+      this._vExaggeration = rapport(etendue, innerH);
+      const ticks = [];
+      for (let v = base; v <= sommet + pas / 2; v += pas) ticks.push(Math.round(v * 1e6) / 1e6);
+      this._yTicks = ticks;
+      return d3.scaleLinear().domain([base, sommet]).range([innerH, 0]);
     }
 
     /**
@@ -1846,20 +1953,29 @@ import * as d3 from 'd3';
       const H = typeof o.height === 'number' ? o.height : 180;
 
       const mt = toPx(m.top), mr = toPx(m.right), mb = toPx(m.bottom), ml = toPx(m.left);
-      const innerW = Math.max(10, W - ml - mr), innerH = Math.max(10, H - mt - mb);
+      const innerW = Math.max(10, W - ml - mr);
       const xTicks = o.xTicks != null ? o.xTicks : Math.max(2, Math.round(innerW / 80));
+
+      // L'ÉCHELLE VERTICALE D'ABORD, LE CADRE ENSUITE. La hauteur demandée n'est qu'un
+      // MAXIMUM : sous un plafond d'exagération, le graphe se contente de ce que le dessin
+      // occupe, et le panneau se réduit d'autant plutôt que de rester vide au-dessus.
+      const zpad = (s.max - s.min) * 0.1 || 10;
+      const y = this._yScale(s, zpad, Math.max(10, H - mt - mb), innerW);
+      const innerH = this._chartHeight;
+      const Hsvg = innerH + mt + mb;
       const yTicks = o.yTicks != null ? o.yTicks : Math.max(2, Math.round(innerH / 40));
+      // Les graduations rondes que l'échelle a choisies l'emportent sur un simple nombre :
+      // c'est ce qui pose la dernière ligne juste au-dessus du sommet de la trace.
+      const axeY = (axe) => this._yTicks ? axe.tickValues(this._yTicks) : axe.ticks(yTicks);
 
       this._body.innerHTML = '';
-      const svg = d3.select(this._body).append('svg').attr('class', 'oep-svg').attr('width', W).attr('height', H).attr('viewBox', `0 0 ${W} ${H}`);
+      const svg = d3.select(this._body).append('svg').attr('class', 'oep-svg').attr('width', W).attr('height', Hsvg).attr('viewBox', `0 0 ${W} ${Hsvg}`);
       const g = svg.append('g').attr('transform', `translate(${ml},${mt})`);
 
       const x = d3.scaleLinear().domain([0, s.distance]).range([0, innerW]);
-      const zpad = (s.max - s.min) * 0.1 || 10;
-      const y = this._yScale(s, zpad, innerH, innerW);
       this._x = x; this._y = y; this._dims = { innerW, innerH };
 
-      if (o.grid) g.append('g').attr('class', 'oep-grid').call(d3.axisLeft(y).ticks(yTicks).tickSize(-innerW).tickFormat(''));
+      if (o.grid) g.append('g').attr('class', 'oep-grid').call(axeY(d3.axisLeft(y)).tickSize(-innerW).tickFormat(''));
 
       const dscale = distAxisScale(o.units);
       const areaGen = d3.area().x((d) => x(d.x)).y0(innerH).y1((d) => y(d.z));
@@ -1886,7 +2002,7 @@ import * as d3 from 'd3';
       g.append('g').attr('class', 'oep-axis oep-axis-x').attr('transform', `translate(0,${innerH})`)
         .call(d3.axisBottom(x).ticks(xTicks).tickFormat((d) => (d / dscale).toFixed(d / dscale < 10 ? 1 : 0)));
       g.append('text').attr('class', 'oep-axis-label').attr('x', innerW).attr('y', innerH + mb - 4).attr('text-anchor', 'end').text(distAxisLabel(o.units));
-      g.append('g').attr('class', 'oep-axis oep-axis-y').call(d3.axisLeft(y).ticks(yTicks).tickFormat((d) => o.units === 'imperial' ? Math.round(d * 3.28084) : d));
+      g.append('g').attr('class', 'oep-axis oep-axis-y').call(axeY(d3.axisLeft(y)).tickFormat((d) => o.units === 'imperial' ? Math.round(d * 3.28084) : d));
 
       // A / B markers while a range is being picked
       if (o.zoom && this._cropDepth < this._cropMax) {

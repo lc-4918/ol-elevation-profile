@@ -119,9 +119,14 @@ Un nombre rend les **amplitudes** comparables, pas les pentes. L'axe horizontal 
 
 L'une comme l'autre forme est un **plancher, non un carcan** : une trace dont l'amplitude dépasse ce que la hauteur peut montrer déborderait du cadre, ce qui est pire que de perdre la comparabilité. L'échelle s'élargit alors pour la contenir, sans rien en dire : aucune mention n'est portée sur le graphe, l'échelle étant une propriété de l'affichage et non de la trace. La valeur réellement appliquée est relisible dans `_vScale`, nul en `'auto'` qui ne demande aucune échelle absolue. Le rapport réellement obtenu est relisible dans `_vExaggeration`, dans **tous** les modes : inférieur à celui demandé dès que le plancher a joué, et dérivant d'une trace à l'autre en `'auto'` — ce qui est précisément la raison pour laquelle `'auto'` ne rend deux profils comparables en rien.
 
+**`{ maxExaggeration: n }`** est un **plafond**, non un contrat. Il laisse `'auto'` faire — la hauteur est remplie, ce qui se lit le mieux — et ne rattrape que l'absurde : une trace longue et peu pentue dont la pente de 0,2 % serait sinon dessinée en muraille. Une trace déjà sous le plafond n'est pas touchée ; contrairement à une exagération fixe, il n'aplatit donc jamais une traversée de montagne pour se plier à une règle.
+
+Sous le plafond, c'est la **hauteur du graphe qui plie, pas l'axe**. À échelle imposée, le dessin ne dépend pas de la hauteur : ses mètres par pixel sont fixés, la trace occupe les mêmes pixels, et tout ce que la hauteur ajoute est du vide au-dessus. Le panneau se réduit donc à ce que le dessin occupe, et l'axe s'arrête sur la première graduation ronde au-dessus du sommet — une trace culminant à 1 149 m, graduée tous les 200, finit sur une ligne à 1 200. Deux garde-fous l'encadrent : le cadre ne dépasse jamais quatre fois l'amplitude de la trace, et le graphe ne descend jamais sous 70 px, en deçà desquels l'axe n'a plus la place de trois graduations. Quand une trace longue et plate met ces deux règles en contradiction, la première l'emporte et l'exagération passe au-dessus du plafond — seul moyen d'avoir à la fois un panneau lisible et un axe qui parle du terrain. `_vExaggeration` le dit, comme toujours ici.
+
 ```js
 new OlElevationProfile({ verticalScale: 50 })                  // 50 m par centimètre
 new OlElevationProfile({ verticalScale: { exaggeration: 6 } }) // vertical dilaté 6 fois
+new OlElevationProfile({ verticalScale: { maxExaggeration: 25 } }) // remplit, sans dépasser 25x
 ```
 
 Posée à la construction, une exagération n'appelle rien d'autre : voir [Pentes comparables](/fr/exemples#pentes-comparables-un-rapport-tenu-une-echelle-recalculee-a-chaque-trace) pour ce qu'elle produit trace par trace, et pour le choix du facteur.

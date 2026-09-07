@@ -156,6 +156,66 @@ check('cap: the cap holds it at the requested ratio',
 check('cap: a lower cap flattens further', capDe(12, tres_longue).part < capDe(20, tres_longue).part);
 check('cap: the axis still starts at the floor', capDe(20, tres_longue).bas === 0);
 
+// ---- 3 quater. under a cap, the HEIGHT gives way, not the axis ------------
+// Holding the cap by widening the window was absurd on a long track: a 1107 km GR
+// topping out at 2638 m was given an axis from 0 to 12000 m, and a 296 km traverse
+// topping out at 119 m an axis from 0 to 3000. The drawing was right; the panel was
+// ninety-five per cent empty and the axis no longer spoke of the terrain.
+//
+// At a fixed scale the drawing does NOT depend on the chart height: its metres per pixel
+// are set, the track covers the same pixels, and all the height adds is emptiness above.
+// So the height is taken away instead.
+const sous = (km, z0, z1, hMax = 250, innerW = 848, cap = 25) => {
+  const cs = [];
+  for (let i = 0; i < 400; i++) {
+    const f = i / 399, ll = fromLonLat([6.0 + f * (km / 78.8), 45.0]);
+    cs.push([ll[0], ll[1], z0 + (z1 - z0) * Math.sin(f * Math.PI / 2)]);
+  }
+  const geom = { getType: () => 'LineString', getCoordinates: () => cs,
+                 getClosestPoint: () => [0, 0], getExtent: () => [0, 0, 1, 1] };
+  const p = new Profile({ dem: null, smoothing: 0, verticalScale: { maxExaggeration: cap },
+                          width: innerW + 72 + 16, height: hMax + 50 });
+  p.setFeature(featureOf(geom));
+  const st = p.getStats();
+  const dom = p._yScale(st, (st.max - st.min) * 0.1 || 10, hMax, innerW).domain();
+  const t = p._yTicks;
+  return { dom, ticks: t, pas: t ? t[1] - t[0] : null, h: p._chartHeight,
+           dessin: (st.max - st.min) / (dom[1] - dom[0]) * p._chartHeight,
+           ex: p._vExaggeration, max: st.max };
+};
+
+// The rule, in the words it was given in: a track topping out at 1149 m, on an axis
+// stepped every 200 m, ends on a line at 1200.
+let r = sous(250, 0, 1149);
+check('cap: the step is round', r.pas === 200);
+check('cap: the last line is the first round step above the summit', r.dom[1] === 1200);
+check('cap: and the graduations are all round', r.ticks.every((v) => v % r.pas === 0));
+
+// The 1107 km GR: the axis used to climb to 12000 m for a 2638 m summit.
+r = sous(1107.4, 0, 2638);
+check('cap: a very long track no longer gets a four-fold axis', r.dom[1] <= 4000);
+check('cap: its panel shrinks instead', r.h < 100);
+check('cap: and the drawing keeps its size', r.dessin > 40);
+check('cap: the cap is still held', Math.abs(r.ex - 25) < 1);
+
+// The 296 km traverse over flat ground: it must STAY flat. Fitting the axis to the
+// terrain would turn 119 m of undulation into a mountain range.
+r = sous(296.5, 0, 119);
+check('cap: a long flat track keeps a small panel', r.h < 120);
+check('cap: its axis stays close to the terrain', r.dom[1] <= 800);
+check('cap: and it is still drawn flat', r.dessin / r.h < 0.25);
+
+// Under 200 km the natural exaggeration stays below the cap, so nothing here applies:
+// the track is drawn as 'auto' draws it, filling the height. That is the case the corpus
+// is mostly made of, and it is left exactly as it was.
+r = sous(138.2, 108, 1597);
+check('cap: a 138 km track is left to auto', r.ticks === null && r.h === 250);
+
+// A long MOUNTAIN track loses nothing: the height it needs, it keeps.
+r = sous(300, 0, 2500);
+check('cap: a long mountain track keeps a tall panel', r.h > 150);
+check('cap: with an axis fitted to the summit', r.dom[1] === 2500);
+
 // Nonsense is ignored rather than obeyed, as elsewhere.
 for (const [nom, v] of [['zero', 0], ['negative', -4], ['not a number', 'twenty']]) {
   const p = new Profile({ dem: null, smoothing: 0, verticalScale: { maxExaggeration: v },

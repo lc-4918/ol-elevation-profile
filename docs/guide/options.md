@@ -119,9 +119,14 @@ A number makes **ranges** comparable, not slopes. The horizontal axis always str
 
 Either form is a **floor, not a cage**: a track whose range exceeds what the height can show would spill out of the frame, which is worse than losing comparability. The scale then widens to contain it, silently: nothing is drawn on the chart to announce the scale, which is a property of the display rather than of the track. The value actually applied is read back from `_vScale`, `null` under `'auto'` which requests no absolute scale. The ratio actually obtained is read back from `_vExaggeration`, in **every** mode: below the one asked for whenever the floor has played, and drifting from one track to the next under `'auto'` — which is exactly why `'auto'` makes no two profiles comparable.
 
+**`{ maxExaggeration: n }`** is a **cap**, not a contract. It leaves `'auto'` alone — the height is filled, which reads best — and only reins in the absurd: a long, gently sloping track whose 0.2 % gradient would otherwise be drawn as a wall. A track already under the cap is untouched, so unlike a fixed exaggeration it never flattens a mountain traverse to fit a rule.
+
+Under the cap, it is the **chart height that gives way, not the axis**. At a fixed scale the drawing does not depend on the height: its metres per pixel are set, the track covers the same pixels, and all the height adds is emptiness above. So the panel shrinks to what the drawing needs, and the axis stops on the first round graduation above the summit — a track topping out at 1149 m, stepped every 200, ends on a line at 1200. Two guards bound it: the window never exceeds four times the track's own range, and the chart never falls below 70 px, under which the axis has no room for three graduations. When a long, flat track makes those two contradict each other, the first wins and the exaggeration rises above the cap — the only way to keep both a readable panel and an axis that speaks of the terrain. `_vExaggeration` says so, as always.
+
 ```js
 new OlElevationProfile({ verticalScale: 50 })                  // 50 m per centimetre
 new OlElevationProfile({ verticalScale: { exaggeration: 6 } }) // vertical stretched 6x
+new OlElevationProfile({ verticalScale: { maxExaggeration: 25 } }) // fills, but never past 25x
 ```
 
 Set at construction, an exaggeration needs nothing further: see [Comparable slopes](/examples#comparable-slopes-a-held-ratio-a-scale-recomputed-per-track) for what it produces track by track, and for choosing the factor.
