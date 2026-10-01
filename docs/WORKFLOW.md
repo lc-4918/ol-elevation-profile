@@ -48,11 +48,15 @@ récupérer un bundle utilisable sans publier de version.
 
 **Déclenchement :** push d'un tag Git au format `vX.Y.Z` (ex. `v0.7.0`).
 
-**Prérequis :** dans **Settings > Secrets and variables > Actions** du dépôt :
+**Prérequis :**
+
+- sur npmjs, dans **Settings > Trusted Publisher** du paquet : GitHub Actions, dépôt
+  `lc-4918/ol-elevation-profile`, workflow `build-release.yml`. C'est la *publication de
+  confiance* : la CI publie par l'OIDC de l'exécution, sans aucun jeton npm ;
+- dans **Settings > Secrets and variables > Actions** du dépôt, facultatif :
 
 | Secret | Contenu | Obligatoire |
 |---|---|---|
-| `NPM_TOKEN` | jeton npmjs de type **Automation** (contourne la 2FA) | oui |
 | `RELEASE_PAT` | PAT fin, portée `Contents: read and write` sur ce dépôt | non |
 
 `RELEASE_PAT` ne sert qu'à l'affichage : sans lui, la Release est créée par
@@ -60,13 +64,16 @@ récupérer un bundle utilisable sans publier de version.
 être changé après coup (l'API ne l'expose pas en écriture), il faut donc le fixer à la
 création.
 
-Un jeton **Automation** est nécessaire pour `NPM_TOKEN` : un jeton *Publish* classique
-déclenche la 2FA, que la CI ne peut pas satisfaire.
+Il n'y a plus de secret `NPM_TOKEN` : les jetons npm qui contournent la 2FA sont en voie
+de retrait et expirent. Un jeton expiré ou révoqué se trahit par un trompeur
+`404 Not Found - PUT https://registry.npmjs.org/ol-elevation-profile` (la publication de
+la 2.3.0 a échoué ainsi). Si le nom du fichier de workflow change, mettre à jour l'éditeur
+de confiance sur npmjs, sinon la publication échoue de la même façon.
 
 **Processus complet :**
 1. Checkout complet (`fetch-depth: 0`) au commit du tag.
-2. Setup Node.js 24 avec `registry-url` npmjs : c'est cette option qui écrit le `.npmrc`
-   d'authentification que `npm publish` lira.
+2. Setup Node.js 24 avec `registry-url` npmjs, puis npm porté à 11.5.1 au moins (version
+   minimale de la publication de confiance).
 3. **Vérification du contrat de version** (voir [section 5](#5-le-contrat-de-version)).
 4. `npm ci`, `npm run build`, `npm test`.
 5. `npm pack` : le tarball exact destiné à npmjs, mis de côté.
@@ -158,5 +165,5 @@ utilisateurs de la bibliothèque.
   facilite leur lecture.
 - **Ne jamais publier à la main** : `npm publish` depuis un poste court-circuite les tests,
   la provenance et la Release GitHub.
-- **Secrets** : `NPM_TOKEN` et `RELEASE_PAT` ne vivent que dans les secrets GitHub, jamais
-  dans le dépôt ni dans un `.npmrc` commité.
+- **Secrets** : `RELEASE_PAT` ne vit que dans les secrets GitHub, jamais dans le dépôt ;
+  aucun jeton npm n'est nécessaire, ni dans la CI ni dans un `.npmrc` commité.

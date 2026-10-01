@@ -46,7 +46,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write        # creation de la Release
-      id-token: write        # provenance npm (attestation Sigstore)
+      id-token: write        # publication de confiance npm (OIDC) + provenance Sigstore
     steps:
       # fetch-depth: 0 : les notes de version comparent ce tag au precedent ; un checkout
       # superficiel n'aurait ni les commits ni les tags.
@@ -59,6 +59,11 @@ jobs:
           node-version: 24
           cache: npm
           registry-url: 'https://registry.npmjs.org'   # ecrit le .npmrc d'authentification
+
+      # La publication de confiance (Trusted Publishing) exige npm >= 11.5.1 ; le npm livre
+      # avec Node 24 peut etre plus ancien selon la version mineure installee.
+      - name: Upgrade npm for trusted publishing
+        run: npm install -g npm@^11.5.1
 
       # Le contrat de version : npm publie ce que dit package.json, pas ce que dit le tag.
       # Sans ce garde-fou, taguer v0.7.0 en oubliant de bumper package.json republierait
@@ -101,14 +106,16 @@ jobs:
       # npm d'abord, la Release ensuite : si la publication echoue, aucune Release ne vient
       # annoncer une version qui n'existe pas sur le registre.
       #
-      # --provenance signe le paquet via l'OIDC de l'execution (d'ou id-token: write) et
-      # affiche le badge "Built and signed on GitHub Actions" sur npmjs. L'attestation lie
-      # le tarball a ce depot et a ce commit ; elle exige que repository.url de package.json
-      # designe bien ce depot.
+      # Aucun jeton npm : le paquet declare ce workflow (build-release.yml) comme editeur de
+      # confiance sur npmjs, et npm publish echange l'OIDC de l'execution (d'ou id-token:
+      # write) contre un droit de publication valable pour ce seul envoi. Plus de NPM_TOKEN
+      # a renouveler ; un jeton expire repondait par un 404 trompeur au PUT.
+      #
+      # --provenance signe le paquet et affiche le badge "Built and signed on GitHub
+      # Actions" sur npmjs. L'attestation lie le tarball a ce depot et a ce commit ; elle
+      # exige que repository.url de package.json designe bien ce depot.
       - name: Publish to npm
         run: npm publish --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       # La Release est publiee sous l'identite du PAT fourni, et non sous celle du
       # GITHUB_TOKEN de l'execution, qui appartient a github-actions[bot] et apparaitrait
