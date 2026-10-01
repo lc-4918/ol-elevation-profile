@@ -266,12 +266,19 @@ check('lang: fr', pFr.options.labels.empty === 'Cliquez un tracé'
 const pEs = new Profile({ lang: 'es', zoom: true, dem: null });
 check('lang: es', pEs.options.labels.empty === 'Haga clic en una traza'
   && pEs._btnB.title === 'Definir el final (B)');
+const pIt = new Profile({ lang: 'it', zoom: true, dem: null });
+check('lang: it', pIt.options.labels.empty === 'Fai clic su un tracciato'
+  && pIt._btnAll.title === 'Mostra tutto');
+const pDe = new Profile({ lang: 'de', zoom: true, dem: null });
+check('lang: de', pDe.options.labels.empty === 'Strecke anklicken'
+  && pDe._btnB.title === 'Ende setzen (B)'
+  && pDe._toggleBtn.title === 'Profil einklappen');
 check('lang: an unknown code falls back to English',
-  new Profile({ lang: 'de' }).options.labels.empty === 'Click a track');
+  new Profile({ lang: 'pt' }).options.labels.empty === 'Click a track');
 
 // Every set carries every key: a partial one would mix two languages on screen.
 const labelKeys = Object.keys(pEn.options.labels);
-check('lang: no set has a hole', ['fr', 'es'].every((lg) => {
+check('lang: no set has a hole', ['fr', 'es', 'it', 'de'].every((lg) => {
   const l = new Profile({ lang: lg }).options.labels;
   return labelKeys.every((k) => l[k] != null) && Object.keys(l).length === labelKeys.length;
 }));
@@ -286,7 +293,8 @@ check('lang: expanded again, it offers to collapse', pEn._toggleBtn.title === 'C
 check('lang: es toggles are translated too', pEs._toggleBtn.title === 'Contraer el perfil');
 
 check('lang: duration units belong to the set',
-  pEs.options.labels.durationUnits.s === 'seg' && pFr.options.labels.durationUnits.d === 'j');
+  pEs.options.labels.durationUnits.s === 'seg' && pFr.options.labels.durationUnits.d === 'j'
+  && pDe._fmtDuration(6480) === '1 Std. 48 Min.' && pIt._fmtDuration(2 * 86400 + 3 * 3600) === '2 g 3 h');
 
 // Switching rebuilds from the new set, and refreshes what a render does not rewrite.
 pFr.setOptions({ lang: 'es' });

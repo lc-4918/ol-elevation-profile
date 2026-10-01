@@ -69,7 +69,7 @@ const profile = new OlElevationProfile({
   headerItems: ['distance', 'ascent', 'descent', 'minmax'], // + 'min','max','duration' or {property,...}
   titleProperty: 'name',            // or a list, tried in order
   titleLink: null,                  // a name, or a list: the first real URL wins
-  lang: 'en',                       // 'en' | 'fr' | 'es'
+  lang: 'en',                       // 'en' | 'fr' | 'es' | 'it' | 'de'
   labels: {}                        // per-key overrides, applied on top of lang
 })
 map.addControl(profile)
@@ -209,7 +209,7 @@ Pick the factor from the terrain rather than from taste: 4 to 6 suits rolling co
 
 ## Language
 
-English by default; French and Spanish ship with the library, and `labels` covers anything else.
+English by default; French, Spanish, Italian and German ship with the library, and `labels` covers anything else.
 
 ```js
 new OlElevationProfile({ lang: 'es' })

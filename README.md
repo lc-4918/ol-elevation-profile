@@ -87,7 +87,7 @@ A recorded elevation wobbles by a few metres from one point to the next, and eac
 
 ### Languages
 
-Labels ship in **English** (default), **French** and **Spanish**: `lang: 'fr'` switches the whole panel, buttons and accessible names included, and `profile.setOptions({ lang: 'es' })` does it at runtime. An unknown code falls back to English rather than leaving keys empty. `labels` still overrides any key on top of the chosen language, which is how you reach a language that is not shipped, and an override survives a later language change.
+Labels ship in **English** (default), **French**, **Spanish**, **Italian** and **German**: `lang: 'fr'` switches the whole panel, buttons and accessible names included, and `profile.setOptions({ lang: 'es' })` does it at runtime. An unknown code falls back to English rather than leaving keys empty. `labels` still overrides any key on top of the chosen language, which is how you reach a language that is not shipped, and an override survives a later language change.
 
 > **Coming from 1.x**: the shipped labels used to be French, with no way to ask for another language. English is now the default; add `lang: 'fr'` to keep the panel exactly as it was.
 

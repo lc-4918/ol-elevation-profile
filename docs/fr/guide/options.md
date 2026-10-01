@@ -196,7 +196,7 @@ new OlElevationProfile({ titleProperty: ['parcours', 'name'], titleLink: 'fiche'
 new OlElevationProfile({ titleLink: ['link', 'url'] })     // selon ce que porte le jeu
 ```
 
-**`lang`** : langue des libellés livrés : `'en'` (défaut), `'fr'`, `'es'`. Un code inconnu retombe sur l'anglais plutôt que de laisser des clés vides. Chaque jeu est complet : une traduction à trous ferait cohabiter deux langues dans le même panneau.
+**`lang`** : langue des libellés livrés : `'en'` (défaut), `'fr'`, `'es'`, `'it'`, `'de'`. Un code inconnu retombe sur l'anglais plutôt que de laisser des clés vides. Chaque jeu est complet : une traduction à trous ferait cohabiter deux langues dans le même panneau.
 
 ::: warning Depuis la 1.x
 Les libellés étaient français, sans moyen d'en demander d'autres. L'anglais est désormais le défaut, ajoutez `lang: 'fr'` pour retrouver le panneau tel qu'il était.
@@ -294,7 +294,7 @@ const profile = new OlElevationProfile({
   headerItems: ['distance', 'ascent', 'descent', 'minmax'], // + 'min','max','duration' ou {property,...}
   titleProperty: 'name',            // ou une liste, essayée dans l'ordre
   titleLink: null,                  // un nom, ou une liste : la première vraie URL gagne
-  lang: 'en',                       // 'en' | 'fr' | 'es'
+  lang: 'en',                       // 'en' | 'fr' | 'es' | 'it' | 'de'
   labels: {}                        // surcharges clé à clé, par-dessus lang
 })
 map.addControl(profile)

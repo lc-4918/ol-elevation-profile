@@ -69,7 +69,7 @@ const profile = new OlElevationProfile({
   headerItems: ['distance', 'ascent', 'descent', 'minmax'], // + 'min','max','duration' ou {property,...}
   titleProperty: 'name',            // ou une liste, essayée dans l'ordre
   titleLink: null,                  // un nom, ou une liste : la première vraie URL gagne
-  lang: 'en',                       // 'en' | 'fr' | 'es'
+  lang: 'en',                       // 'en' | 'fr' | 'es' | 'it' | 'de'
   labels: {}                        // surcharges clé à clé, par-dessus lang
 })
 map.addControl(profile)
@@ -212,7 +212,7 @@ ressembler à une scie.
 
 ## Langue
 
-L'anglais par défaut ; le français et l'espagnol sont livrés avec la librairie, et `labels` couvre tout le reste.
+L'anglais par défaut ; le français, l'espagnol, l'italien et l'allemand sont livrés avec la librairie, et `labels` couvre tout le reste.
 
 ```js
 new OlElevationProfile({ lang: 'fr' })

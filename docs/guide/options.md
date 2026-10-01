@@ -196,7 +196,7 @@ new OlElevationProfile({ titleProperty: ['parcours', 'name'], titleLink: 'fiche'
 new OlElevationProfile({ titleLink: ['link', 'url'] })     // whichever the dataset uses
 ```
 
-**`lang`**: language of the shipped labels: `'en'` (default), `'fr'`, `'es'`. An unknown code falls back to English rather than leaving keys empty. Each set is complete: a partial translation would put two languages in the same panel.
+**`lang`**: language of the shipped labels: `'en'` (default), `'fr'`, `'es'`, `'it'`, `'de'`. An unknown code falls back to English rather than leaving keys empty. Each set is complete: a partial translation would put two languages in the same panel.
 
 ::: warning Coming from 1.x
 The labels used to be French, with no way to ask for another language. English is now the default, add `lang: 'fr'` to keep the panel exactly as it was.
@@ -294,7 +294,7 @@ const profile = new OlElevationProfile({
   headerItems: ['distance', 'ascent', 'descent', 'minmax'], // + 'min','max','duration' or {property,...}
   titleProperty: 'name',            // or a list, tried in order
   titleLink: null,                  // a name, or a list: the first real URL wins
-  lang: 'en',                       // 'en' | 'fr' | 'es'
+  lang: 'en',                       // 'en' | 'fr' | 'es' | 'it' | 'de'
   labels: {}                        // per-key overrides, applied on top of lang
 })
 map.addControl(profile)

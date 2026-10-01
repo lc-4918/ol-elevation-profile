@@ -84,6 +84,32 @@ import * as d3 from 'd3';
       exportPng: 'Exportar como PNG',
       collapse: 'Contraer el perfil', expand: 'Desplegar el perfil',
       loading: 'Cargando el perfil de elevación'
+    },
+    it: {
+      distance: 'Distanza', elevation: 'Altitudine', slope: 'Pendenza',
+      ascent: 'D+', descent: 'D-', empty: 'Fai clic su un tracciato',
+      noElevation: 'Nessun dato altimetrico',
+      untitled: 'Profilo',
+      time: 'Tempo', duration: 'Durata',
+      durationUnits: { s: 'sec', m: 'min', h: 'h', d: 'g' },
+      zoomStart: 'Imposta l’inizio (A)', zoomEnd: 'Imposta la fine (B)', zoomAll: 'Mostra tutto',
+      zoomBack: 'Torna al livello precedente',
+      exportPng: 'Esporta in PNG',
+      collapse: 'Comprimi il profilo', expand: 'Espandi il profilo',
+      loading: 'Caricamento del profilo altimetrico'
+    },
+    de: {
+      distance: 'Distanz', elevation: 'Höhe', slope: 'Steigung',
+      ascent: 'D+', descent: 'D-', empty: 'Strecke anklicken',
+      noElevation: 'Keine Höhendaten',
+      untitled: 'Profil',
+      time: 'Zeit', duration: 'Dauer',
+      durationUnits: { s: 'Sek.', m: 'Min.', h: 'Std.', d: 'Tg.' },
+      zoomStart: 'Anfang setzen (A)', zoomEnd: 'Ende setzen (B)', zoomAll: 'Alles zeigen',
+      zoomBack: 'Eine Ebene zurück',
+      exportPng: 'Als PNG exportieren',
+      collapse: 'Profil einklappen', expand: 'Profil ausklappen',
+      loading: 'Höhenprofil wird geladen'
     }
   };
 
@@ -135,7 +161,7 @@ import * as d3 from 'd3';
     headerItems: ['distance', 'ascent', 'descent', 'minmax'],
     titleProperty: 'name',        // ou une liste, essayée dans l'ordre
     titleLink: null,              // ou un nom, ou une liste : la première vraie URL gagne
-    lang: 'en',                   // 'en' | 'fr' | 'es' : jeu de libellés livré
+    lang: 'en',                   // 'en' | 'fr' | 'es' | 'it' | 'de' : jeu de libellés livré
     labels: {}                    // surcharges clé à clé, appliquées par-dessus la langue
   };
 
@@ -900,7 +926,7 @@ import * as d3 from 'd3';
    * @property {number} [stopSpeed=0.5] Speed threshold (m/s) below which a segment counts as a stop.
    * @property {Array<'distance'|'elevation'|'slope'|'time'>} [tooltipItems=['distance','elevation']] Tooltip content (`'time'` = elapsed time at the cursor, if the track has time data).
    * @property {Array<string|{property:string,label?:string,asLink?:boolean,linkText?:string}>} [headerItems] Header content (string tokens: distance, ascent, descent, min, max, minmax, `'duration'` = total elapsed time).
-   * @property {('en'|'fr'|'es')} [lang='en'] Language of the shipped labels. An unknown
+   * @property {('en'|'fr'|'es'|'it'|'de')} [lang='en'] Language of the shipped labels. An unknown
    *   code falls back to English rather than leaving keys empty.
    * @property {Object} [labels={}] Per-key overrides applied on top of `lang`. They survive
    *   a later language change, so a corrected key stays corrected.
